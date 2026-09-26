@@ -35,7 +35,8 @@ src/part17.js      อ่านเอกสาร OCR
 src/part18.js      ยอดยกมา
 dist/index.html    ไฟล์เว็บที่ประกอบแล้ว (เปิดในเบราว์เซอร์ได้เลย)
 dist/artifact.html สำหรับเผยแพร่เป็น Claude Artifact
-tests/             สคริปต์ทดสอบ Playwright
+tests/             ชุดทดสอบอัตโนมัติ (ดูหัวข้อ ทดสอบ)
+package.json       คำสั่ง build/test และเวอร์ชันเครื่องมือทดสอบ
 firestore.rules    กฎความปลอดภัยของฐานข้อมูล Firebase
 firebase.json      ค่าสำหรับ deploy rules และรัน Firebase Emulator
 ```
@@ -90,8 +91,20 @@ npx firebase-tools emulators:start --only auth,firestore --project demo-psmacc
 ```
 
 ## ทดสอบ
+ต้องมี Node.js 22 และ Java 11 ขึ้นไป (สำหรับ Firebase Emulator)
 ```
-npm i -g playwright
-NODE_PATH=$(npm root -g) node tests/t65.js
+npm ci
+npx playwright install chromium   # ครั้งแรกครั้งเดียว
+npm run build                     # ประกอบ dist/ และ index.html จาก src/
+npm test                          # รันทุกชุดด้านล่าง
 ```
-(สคริปต์ทดสอบอ้างอิงไฟล์ `t_view.html` ให้สร้างด้วย `cp dist/index.html tests/t_view.html`)
+| คำสั่ง | ทดสอบอะไร |
+|---|---|
+| `npm run test:smoke` | โหมดเบราว์เซอร์และโหมด Claude DB: เปิดทุกหน้า สร้าง/สลับบริษัท การบันทึกข้อมูล ไม่มี error |
+| `npm run test:rules` | `firestore.rules`: แยกข้อมูลหลายบริษัท สิทธิ์ทุกระดับ คำเชิญ เจ้าของหลัก โอนสิทธิ์ Audit Log |
+| `npm run test:e2e` | ใช้งานจริงผ่านเบราว์เซอร์กับ Firebase Emulator: สมัคร Login Logout ลืมรหัสผ่าน เชิญ นำออก โอนสิทธิ์ |
+| `npm run check:dist` | ไฟล์ใน `dist/` และ `index.html` ตรงกับ `src/` (ลืมรัน build หรือไม่) |
+
+`test:rules` และ `test:e2e` เปิด Firebase Emulator ให้เองด้วยโปรเจกต์จำลอง `demo-psmacc` ไม่แตะ Firebase จริง
+ทุก push และ Pull Request จะรันชุดทดสอบนี้อัตโนมัติบน GitHub Actions (`.github/workflows/test.yml`)
+**ถ้าแก้ `firestore.rules` ต้องให้ `npm run test:rules` ผ่านก่อน Publish ทุกครั้ง**
