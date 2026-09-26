@@ -1,0 +1,118 @@
+rules_version = '2';
+// PSMacc: ข้อมูลแยกตามบริษัท สิทธิ์ owner (เจ้าของ) / editor (ผู้แก้ไข) / viewer (ผู้ดู)
+//   companies/{co}                   name, taxId, ownerId (= เจ้าของหลัก), memberIds (ใช้ค้นบริษัทของผู้ใช้)
+//   companies/{co}/members/{uid}     { role, email, addedAt, auditId }  role 'removed' = ถูกนำออกแล้ว
+//   companies/{co}/audit/{id}        บันทึกการเปลี่ยนสิทธิ์ (สร้างได้อย่างเดียว แก้/ลบไม่ได้)
+//   companies/{co}/{collection}/{id} ข้อมูลบัญชี (documents, contacts, accounts, settings, ...)
+//   invites/{co}__{email}            คำเชิญที่ยังไม่ตอบรับ
+//
+// เจ้าของหลัก (ownerId) ถูกลดสิทธิ์หรือนำออกไม่ได้ เปลี่ยนได้ทางเดียวคือเจ้าของหลักโอนสิทธิ์ให้สมาชิกอื่น
+// ทุกการเปลี่ยนแปลงใน members ต้องมี audit entry ที่ตรงกันใน batch เดียวกัน
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function coPath(co) { return /databases/$(database)/documents/companies/$(co); }
+    function memberOf(co, uid) { return /databases/$(database)/documents/companies/$(co)/members/$(uid); }
+    function auditPath(co, id) { return /databases/$(database)/documents/companies/$(co)/audit/$(id); }
+    function invitePath(co) { return /databases/$(database)/documents/invites/$(co + '__' + myEmail()); }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function verified() { return request.auth.token.email_verified == true; }
+    function roles() { return ['owner', 'editor', 'viewer']; }
+    function myRole(co) { return get(memberOf(co, request.auth.uid)).data.role; }
+    function isMember(co) { return signedIn() && exists(memberOf(co, request.auth.uid)) && myRole(co) in roles(); }
+    function canEdit(co) { return isMember(co) && myRole(co) in ['owner', 'editor']; }
+    function isOwner(co) { return isMember(co) && myRole(co) == 'owner'; }
+    function primaryOwner(co) { return get(coPath(co)).data.ownerId; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // audit entry ต้องตรงกับการเปลี่ยนแปลงจริงของสมาชิกใน batch เดียวกัน
+    function validAudit(co, id, a) {
+      let t = memberOf(co, a.targetUid);
+      let before = exists(t) ? get(t).data.role : 'none';
+      let after = getAfter(t).data;
+      return after.auditId == id && after.role == a.toRole && after.email == a.targetEmail && before == a.fromRole
+        && (
+          // สร้างบริษัท: ผู้สร้างเป็นเจ้าของหลัก
+          (a.action == 'create' && a.targetUid == request.auth.uid && a.toRole == 'owner' && before == 'none'
+            && !exists(coPath(co)) && getAfter(coPath(co)).data.ownerId == request.auth.uid)
+          // ตอบรับคำเชิญ: ต้องยืนยันอีเมล ได้สิทธิ์ตามที่เชิญเท่านั้น และต้องลบคำเชิญใน batch เดียวกัน
+          // (คำเชิญใช้ได้ครั้งเดียว คนที่ถูกนำออกจะกลับเข้ามาด้วยคำเชิญเดิมไม่ได้)
+          || (a.action == 'join' && a.targetUid == request.auth.uid && before in ['none', 'removed'] && verified()
+            && exists(invitePath(co)) && !existsAfter(invitePath(co)) && get(invitePath(co)).data.role == a.toRole
+            && get(invitePath(co)).data.invitedByUid == a.grantedBy)
+          // เจ้าของเปลี่ยนสิทธิ์/นำออก สมาชิกคนอื่นที่ไม่ใช่เจ้าของหลัก
+          || (a.action in ['role', 'remove'] && isOwner(co) && a.targetUid != request.auth.uid
+            && a.targetUid != primaryOwner(co) && before in roles()
+            && (a.action == 'remove' ? a.toRole == 'removed' : a.toRole in roles()))
+          // เจ้าของหลักโอนสิทธิ์ให้สมาชิกอื่น (ผู้รับเป็น owner และ ownerId เปลี่ยนใน batch เดียวกัน)
+          || (a.action == 'transfer' && request.auth.uid == primaryOwner(co) && a.targetUid != request.auth.uid
+            && before in roles() && a.toRole == 'owner' && getAfter(coPath(co)).data.ownerId == a.targetUid)
+        );
+    }
+
+    match /companies/{co} {
+      allow get: if isMember(co);
+      allow list: if signedIn() && request.auth.uid in resource.data.memberIds;
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds == [request.auth.uid];
+      allow update: if
+        // โอนสิทธิ์เจ้าของหลัก: เฉพาะเจ้าของหลักปัจจุบัน และต้องมี audit 'transfer' ของผู้รับใน batch เดียวกัน
+        (signedIn() && request.auth.uid == resource.data.ownerId && changed().hasOnly(['ownerId'])
+          && request.resource.data.ownerId in resource.data.memberIds
+          && getAfter(auditPath(co, getAfter(memberOf(co, request.resource.data.ownerId)).data.auditId)).data.action == 'transfer')
+        // เจ้าของแก้ข้อมูลบริษัทได้ แต่ห้ามเปลี่ยน ownerId และห้ามเอาเจ้าของหลักออกจาก memberIds
+        || (isOwner(co) && request.resource.data.ownerId == resource.data.ownerId
+          && resource.data.ownerId in request.resource.data.memberIds)
+        // ผู้แก้ไขเปลี่ยนได้เฉพาะชื่อและเลขผู้เสียภาษี (sync จากหน้าตั้งค่า)
+        || (canEdit(co) && changed().hasOnly(['name', 'taxId']))
+        // ผู้ได้รับเชิญเพิ่มตัวเองเข้า memberIds พร้อมกับ member doc ใน batch เดียวกัน
+        || (signedIn() && !isMember(co) && changed().hasOnly(['memberIds'])
+          && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+          && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+          && request.auth.uid in request.resource.data.memberIds
+          && getAfter(memberOf(co, request.auth.uid)).data.role in roles());
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerId;
+
+      match /members/{uid} {
+        allow read: if isMember(co) || (signedIn() && uid == request.auth.uid);
+        // ทุกการเขียนต้องอ้างถึง audit entry ใหม่ที่สร้างใน batch เดียวกัน (validAudit ตรวจความถูกต้อง)
+        allow create, update: if signedIn()
+          && request.resource.data.keys().hasOnly(['role', 'email', 'addedAt', 'auditId'])
+          && request.resource.data.role in ['owner', 'editor', 'viewer', 'removed']
+          && (resource == null
+            ? (uid == request.auth.uid && request.resource.data.email == myEmail())
+            : (request.resource.data.email == resource.data.email && request.resource.data.auditId != resource.data.get('auditId', '')))
+          && !exists(auditPath(co, request.resource.data.auditId))
+          && existsAfter(auditPath(co, request.resource.data.auditId));
+        allow delete: if false; // นำออกด้วยการตั้ง role เป็น 'removed' เพื่อให้มี audit
+      }
+
+      match /audit/{id} {
+        allow read: if isOwner(co);
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['action', 'actorUid', 'actorEmail', 'targetUid', 'targetEmail', 'fromRole', 'toRole', 'grantedBy', 'at'])
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.actorEmail == myEmail()
+          && request.resource.data.at == request.time
+          && validAudit(co, id, request.resource.data);
+        allow update, delete: if false;
+      }
+
+      match /{coll}/{id} {
+        allow read: if !(coll in ['members', 'audit']) && isMember(co);
+        allow write: if !(coll in ['members', 'audit']) && canEdit(co);
+      }
+    }
+
+    match /invites/{id} {
+      allow read: if signedIn() && (resource.data.email == myEmail() || isOwner(resource.data.coId));
+      allow create: if signedIn() && isOwner(request.resource.data.coId)
+        && id == request.resource.data.coId + '__' + request.resource.data.email
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.role in ['editor', 'viewer']
+        && request.resource.data.invitedByUid == request.auth.uid;
+      allow delete: if signedIn() && (resource.data.email == myEmail() || isOwner(resource.data.coId));
+    }
+  }
+}

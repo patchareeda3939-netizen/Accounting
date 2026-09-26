@@ -117,6 +117,7 @@ function bindRecon() {
     q('recAcc') && (q('recAcc').onchange = function(e) { rec.acc = e.target.value; rec.endBal = ''; rec.begBal = ''; rec.stmt = null; rec.match = {}; refreshPageData(); });
     q('recResume') && (q('recResume').onclick = function() { var d = reconDoc(rec.acc).draft; Object.assign(rec, { begBal: d.begBal != null ? d.begBal : '', end: d.end, endBal: d.endBal, cleared: Object.assign({}, d.cleared || {}), stmt: d.stmt || null, match: Object.assign({}, d.match || {}), stage:'work' }); refreshPageData(); });
     c.querySelectorAll('[data-stmtimp]').forEach(function(b) { b.onclick = openStmtImport; });
+    if (!q('recEnd')) return; // no bank accounts yet: empty state has no form
     q('recEnd').onchange = function(e) { ['recFeeDate','recIntDate'].forEach(function(id) { if (!q(id)._touched) q(id).value = e.target.value; }); };
     ['recFeeDate','recIntDate'].forEach(function(id) { q(id).addEventListener('change', function() { q(id)._touched = 1; }); });
     q('recStart').onclick = async function() {

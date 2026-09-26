@@ -1,5 +1,6 @@
 /* ================= Multi-company & branches ================= */
 function coList() {
+  if (FB_MODE) return COMPANIES;
   var main = COMPANIES.find(function(c) { return c._id === 'main'; });
   var list = COMPANIES.filter(function(c) { return c._id !== 'main'; });
   return [{ _id:'main', name: (main && main.name) || (CUR_CO === 'main' ? companyName() : 'บริษัทหลัก') }].concat(list);
@@ -22,11 +23,13 @@ function toggleCoMenu() {
   var r = byId('companyPill').getBoundingClientRect();
   m.style.left = Math.max(8, r.left) + 'px'; m.style.top = (r.bottom + 6) + 'px';
   m.innerHTML = '<div class="co-menu-h">บริษัทของคุณ</div>' + coList().map(function(c) { return '<button type="button" data-cosw="' + esc(c._id) + '" class="' + (c._id === CUR_CO ? 'on' : '') + '">' + (c._id === CUR_CO ? '✓ ' : '') + esc(c._id === CUR_CO ? companyName() : c.name) + (c.taxId ? '<small>' + esc(c.taxId) + '</small>' : '') + '</button>'; }).join('') +
-    '<hr><button type="button" data-conew>+ เพิ่มบริษัทใหม่</button><button type="button" data-coset>ตั้งค่าบริษัทและสาขา</button>';
+    '<hr><button type="button" data-conew>+ เพิ่มบริษัทใหม่</button><button type="button" data-coset>ตั้งค่าบริษัทและสาขา</button>' +
+    (FB_MODE ? '<button type="button" data-cousers>จัดการผู้ใช้</button><hr><button type="button" data-coout>ออกจากระบบ <small>' + esc(fbEmail()) + '</small></button>' : '');
   m.hidden = false;
   m.querySelectorAll('[data-cosw]').forEach(function(b) { b.onclick = function() { m.hidden = true; switchCompany(b.dataset.cosw); showToast('สลับเป็น ' + b.textContent.replace('✓ ', '')); }; });
   m.querySelector('[data-conew]').onclick = function() { m.hidden = true; openNewCompany(); };
   m.querySelector('[data-coset]').onclick = function() { m.hidden = true; go('settings', 'company'); };
+  if (FB_MODE) { m.querySelector('[data-cousers]').onclick = function() { m.hidden = true; fbOpenMembers(); }; m.querySelector('[data-coout]').onclick = fbSignOut; }
 }
 function openNewCompany() {
   var body = '<p class="small muted" style="margin:0">แต่ละบริษัทมีข้อมูลแยกกันทั้งหมด (เอกสาร ผังบัญชี ผู้ติดต่อ สินค้า ภาษี และการตั้งค่า) สลับบริษัทได้จากชื่อบริษัทมุมซ้ายบน</p>' +
@@ -40,7 +43,8 @@ function openNewCompany() {
     btn.disabled = true;
     var id = 'c' + Date.now().toString(36), info = { name: name, taxId: byId('ncTax').value.trim(), branch: byId('ncBranch').value.trim(), legalAddress: byId('ncAddr').value.trim() }, coa = byId('ncCoa').checked;
     try {
-      if (db) {
+      if (FB_MODE) await fbCreateCompany(id, name, info.taxId);
+      else if (db) {
         if (!COMPANIES.some(function(c) { return c._id === 'main'; })) await db.doc('companies/main').set({ name: companyName(), taxId: companySettings().taxId || '', createdAt: 0 });
         await db.doc('companies/' + id).set({ name: name, taxId: info.taxId, createdAt: Date.now() });
       } else { if (!COMPANIES.some(function(c) { return c._id === 'main'; })) COMPANIES.push({ _id:'main', name: companyName(), createdAt: 0 }); COMPANIES.push({ _id: id, name: name, taxId: info.taxId, createdAt: Date.now() }); }
