@@ -1,0 +1,10 @@
+const { chromium } = require('playwright');
+(async () => { const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1300,height:1300}}); const errs=[]; p.on('pageerror', e => errs.push(e.message));
+  await p.goto('file://' + __dirname + '/t_view.html'); await p.waitForTimeout(300);
+  await p.evaluate(async()=>{ loadStandardCoa(); await new Promise(r=>setTimeout(r,300));
+    await addRec('documents',{type:'journalEntry',typeLabel:'JE',group:'other',party:'ยอดยกมา',date:'2026-01-01',docNo:'JV-OB',items:[{account:'1120 x',debit:100000,credit:0},{account:'3900 x',debit:0,credit:100000}],total:100000,extra:{openingFor:'1120'},createdAt:1}); });
+  await p.evaluate(()=>go('accounting','opening')); await p.waitForTimeout(300);
+  await p.setInputFiles('#obFile',{name:'tb.csv',mimeType:'text/csv',buffer:Buffer.from('รหัส,ชื่อ,เดบิต,เครดิต\n1110,เงินสด,5000,0\n1130,ลูกหนี้,20000,0\n1210,อุปกรณ์,50000,0\n1220,ค่าเสื่อมสะสม,0,10000\n2110,เจ้าหนี้,0,15000\n3110,ทุน,0,40000\n')}); await p.waitForTimeout(400);
+  await p.screenshot({path:'ob.png'});
+  await p.click('#obSave'); await p.waitForTimeout(400);
+  console.log(await p.evaluate(()=>{ const d=obDoc(); const tb=accountBalances(); let D=0,C=0; Object.values(tb).forEach(x=>{D+=x.dr;C+=x.cr;}); return JSON.stringify([d.docNo, d.items.map(i=>i.account.split(' ')[0]+':'+i.debit+'/'+i.credit), round2(D), round2(C)]); }), errs); await b.close(); })();

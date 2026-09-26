@@ -1,0 +1,11 @@
+const { chromium } = require('playwright'); const fs=require('fs');
+(async () => { const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1400,height:700}}); const errs=[]; p.on('pageerror', e => errs.push(e.message));
+  await p.goto('file://' + __dirname + '/t_view.html'); await p.waitForTimeout(300);
+  const docs = fs.readdirSync('/tmp/dbdump/documents').map(f=>{ const j=JSON.parse(fs.readFileSync('/tmp/dbdump/documents/'+f)); return j.data||j; });
+  await p.evaluate(async(docs)=>{ loadStandardCoa(); await new Promise(r=>setTimeout(r,300)); for (const d of docs) await addRec('documents', d);
+    await addRec('documents',{type:'expense',typeLabel:'ค่าใช้จ่าย',group:'supplier',party:'ร้าน A',date:'2026-09-20',docNo:'EX-1',vatMode:'none',subtotal:300,vat:0,total:300,net:300,extra:{method:'เงินสด'},createdAt:9});
+    await addRec('documents',{type:'bill',typeLabel:'บิลซื้อ',group:'supplier',party:'ร้าน B',date:'2026-09-01',docNo:'BL-2',items:[],subtotal:800,vat:0,total:800,net:800,extra:{dueDate:'2026-09-10'},status:'unpaid',createdAt:10});
+    txSt('billing:expenseTx').period='all'; go('billing','expenseTx'); }, docs);
+  await p.waitForTimeout(300); await p.screenshot({path:'extx.png'});
+  await p.selectOption('select[data-tx="status"]','open'); await p.waitForTimeout(200);
+  console.log(await p.evaluate(()=>Array.from(document.querySelectorAll('#pageData tbody tr')).map(t=>t.innerText.split('\t').slice(2,4).join(' ')).join(' | ')), errs); await b.close(); })();

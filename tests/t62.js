@@ -1,0 +1,11 @@
+const { chromium } = require('playwright');
+(async () => { const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1300,height:900}}); const errs=[]; p.on('pageerror', e => errs.push(e.message));
+  await p.goto('file://' + __dirname + '/t_view.html'); await p.waitForTimeout(300);
+  await p.evaluate(async()=>{ loadStandardCoa(); await new Promise(r=>setTimeout(r,300));
+    await addRec('documents',{type:'journalEntry',typeLabel:'JE',group:'other',party:'ยอดยกมา',date:'2026-01-01',docNo:'JV-OB',items:[{account:'1120',debit:2116326.18,credit:0},{account:'3900',debit:0,credit:2116326.18}],total:2116326.18,extra:{openingAll:true},createdAt:1});
+    await addRec('documents',{type:'journalEntry',typeLabel:'JE',group:'other',party:'รับ',date:'2026-01-05',docNo:'J1',items:[{account:'1120',debit:4835,credit:0},{account:'4110',debit:0,credit:4835}],total:4835,createdAt:2}); });
+  await p.evaluate(()=>go('accounting','reconcile')); await p.waitForTimeout(200); await p.selectOption('#recAcc','1120');
+  await p.click('[data-stmtimp]'); await p.setInputFiles('#stFile',{name:'s.csv',mimeType:'text/csv',buffer:Buffer.from('วันที่,รายการ,ถอน,ฝาก,ยอดคงเหลือ\n05/01/2026,X1 ENET,,4835,2121161.18\n')}); await p.waitForTimeout(300);
+  await p.click('#modalFoot >> text=นำเข้าและจับคู่'); await p.waitForTimeout(300);
+  await p.click('#recStart'); await p.waitForTimeout(300);
+  console.log(await p.evaluate(()=>[JSON.stringify(reconCalc()), Object.keys(rec.match).length, document.querySelectorAll('[data-recc]').length]), errs); await b.close(); })();
