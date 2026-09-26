@@ -13,7 +13,9 @@
 
 ## โครงสร้าง
 ```
+src/config.js      ค่า Firebase (ระบบ Login)
 src/shell.html     CSS + โครง HTML
+src/part01.js      Login, ผู้ใช้และสิทธิ์ (Firebase)
 src/part02.js      ข้อมูลหลัก ฟอร์มเอกสาร การรับ/จ่ายชำระ การลงบัญชี
 src/part03.js      หน้าเมนูต่าง ๆ
 src/part04.js      รายงาน
@@ -34,6 +36,8 @@ src/part18.js      ยอดยกมา
 dist/index.html    ไฟล์เว็บที่ประกอบแล้ว (เปิดในเบราว์เซอร์ได้เลย)
 dist/artifact.html สำหรับเผยแพร่เป็น Claude Artifact
 tests/             สคริปต์ทดสอบ Playwright
+firestore.rules    กฎความปลอดภัยของฐานข้อมูล Firebase
+firebase.json      ค่าสำหรับ deploy rules และรัน Firebase Emulator
 ```
 
 ## วิธีใช้
@@ -44,9 +48,41 @@ tests/             สคริปต์ทดสอบ Playwright
 Settings → Pages → Source: `main` branch, โฟลเดอร์ `/ (root)` → เว็บจะอยู่ที่ `https://<ชื่อผู้ใช้>.github.io/<ชื่อ repo>/`
 
 ## การเก็บข้อมูล
+- ตั้งค่า **Firebase** แล้ว (ดูหัวข้อถัดไป): ต้องเข้าสู่ระบบ ข้อมูลเก็บบน Firebase ใช้ร่วมกันได้หลายคนจากทุกเครื่อง
 - เปิดเป็น **Claude Artifact**: ข้อมูลเก็บในฐานข้อมูลของ Artifact ใช้ร่วมกันได้หลายคน
 - เปิดเป็น **ไฟล์/GitHub Pages**: ข้อมูลเก็บใน localStorage ของเบราว์เซอร์เครื่องนั้นเท่านั้น
   ควรสำรองข้อมูลสม่ำเสมอ (ฟันเฟือง → สำรองข้อมูลบริษัท) และฟีเจอร์แนบไฟล์/อ่านเอกสารด้วย Claude ใช้ไม่ได้ในโหมดนี้
+
+## ระบบ Login (Firebase)
+เข้าสู่ระบบด้วยอีเมลและรหัสผ่าน แต่ละบริษัทมีสิทธิ์ผู้ใช้ 3 ระดับ
+- **เจ้าของ**: ทำได้ทุกอย่าง รวมถึงเชิญผู้ใช้และกำหนดสิทธิ์
+- **ผู้แก้ไข**: สร้างและแก้ไขเอกสารและข้อมูลทั้งหมด
+- **ผู้ดู**: ดูข้อมูลและรายงานได้อย่างเดียว
+
+### ตั้งค่าครั้งแรก
+1. สร้างโปรเจกต์ที่ https://console.firebase.google.com
+2. **Authentication → Sign-in method** เปิด **Email/Password**
+3. **Firestore Database → Create database** เลือก production mode
+4. **Firestore Database → Rules** คัดลอกเนื้อหาไฟล์ `firestore.rules` ไปวางแทนของเดิม แล้วกด **Publish**
+   (หรือใช้คำสั่ง `npx firebase-tools deploy --only firestore:rules --project <project-id>`)
+5. **Project settings → Your apps → Add app (Web)** คัดลอกค่า `firebaseConfig` ไปใส่ใน `src/config.js` แล้วรัน `./build.sh`
+6. ถ้าเผยแพร่บน GitHub Pages: **Authentication → Settings → Authorized domains** เพิ่ม `<ชื่อผู้ใช้>.github.io`
+
+ค่าใน `src/config.js` เปิดเผยได้ ความปลอดภัยของข้อมูลมาจาก `firestore.rules` ต้อง Publish rules ทุกครั้งที่แก้ไฟล์นี้
+
+### การใช้งาน
+- ผู้ใช้ใหม่สมัครสมาชิกแล้วสร้างบริษัทแรก ผู้สร้างเป็นเจ้าของบริษัท
+- เจ้าของเชิญผู้ใช้จาก **ชื่อบริษัทมุมซ้ายบน → จัดการผู้ใช้** ระบบไม่ส่งอีเมลเชิญให้
+  ต้องแจ้งผู้ใช้เองให้สมัครด้วยอีเมลที่เชิญและกดลิงก์ยืนยันอีเมล จากนั้นบริษัทจะปรากฏเมื่อเข้าสู่ระบบ
+- ย้ายข้อมูลเดิมจากโหมดเบราว์เซอร์: ในโหมดเดิมใช้ ฟันเฟือง → สำรองข้อมูลบริษัท แล้วเข้าสู่ระบบ Firebase และใช้ กู้คืนจากไฟล์สำรองข้อมูล
+- ข้อจำกัด: ผู้ดูยังเห็นปุ่มสร้าง/แก้ไข แต่ระบบจะไม่ยอมให้บันทึก, แนบไฟล์และอ่านเอกสารด้วย Claude ใช้ไม่ได้ในโหมดนี้,
+  ทุกครั้งที่เปิดแอประบบจะอ่านข้อมูลทั้งบริษัท ควรตรวจสอบโควตาและค่าบริการของ Firebase เมื่อข้อมูลมาก
+
+### ทดสอบกับ Firebase Emulator
+ตั้ง `FIREBASE_CONFIG` เป็นค่าใดก็ได้ที่มี `apiKey` และ `projectId: 'demo-psmacc'` และตั้ง `FIREBASE_EMULATOR_HOST = '127.0.0.1'` แล้วรัน
+```
+npx firebase-tools emulators:start --only auth,firestore --project demo-psmacc
+```
 
 ## ทดสอบ
 ```

@@ -68,6 +68,7 @@ function openReportDefaults() {
     } }] });
 }
 function openUsersInfo() {
+  if (FB_MODE) return fbOpenMembers();
   openModal({ title:'จัดการผู้ใช้', focus:false, body: '<p style="margin:0;line-height:1.7">ผู้ใช้และสิทธิ์จัดการจากเมนู <b>Share</b> ของหน้านี้บน claude.ai</p><ul style="margin:0;padding-left:20px;line-height:1.9;font-size:14px"><li><b>Contributor</b> สร้างและแก้ไขเอกสาร ผังบัญชี และข้อมูลทั้งหมด</li><li><b>Viewer / Commenter</b> ดูข้อมูลได้อย่างเดียว</li><li><b>Editor</b> ทำได้ทุกอย่างรวมถึงเผยแพร่เวอร์ชันใหม่</li></ul><p class="small muted" style="margin:0">ผู้ที่เปิดหน้านี้ได้ต้องอยู่ในองค์กรเดียวกันกับเจ้าของ</p>', buttons:[{ label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
 }
 function openPrivacy() {

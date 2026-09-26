@@ -182,11 +182,13 @@ function cname(coll) { return CUR_CO === 'main' ? coll : coll + '__' + CUR_CO; }
 var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc']];
 async function initDb() {
   try { db = (window.claude && window.claude.use) ? await window.claude.use('db') : null; } catch (e) { db = null; }
+  if (!db && fbConfigured()) db = await fbStart();
   dbReady = true;
   byId('modeBadge').hidden = !!db;
   if (!db) { localLoadCompanies(); localLoad(); onData(); return; }
   try { db.collection('companies').orderBy('createdAt', 'asc').limit(200).onSnapshot(function(snap) { COMPANIES = snap.docs.map(function(d) { var o = Object.assign({}, d.data()); o._id = d.id; return o; }); if (typeof renderCoSwitch === 'function') renderCoSwitch(); }); } catch (e) {}
   subscribeAll();
+  if (FB_MODE) fbAfterStart();
 }
 function subscribeAll() {
   _unsubs.forEach(function(u) { try { u && u(); } catch (e) {} }); _unsubs = [];
@@ -210,6 +212,7 @@ function switchCompany(id) {
   CUR_CO = id; try { localStorage.setItem('psm_company', id); } catch (e) {}
   if (!db && !LOCAL_CO[id]) localLoad();
   if (db) subscribeAll();
+  if (FB_MODE) fbWatchRole();
   var hb = byId('sidebarHomeBtn'); if (hb) hb.click();
   onData();
 }
@@ -221,6 +224,7 @@ function sortLocal(coll) {
 function writeError(e) {
   var code = e && e.code;
   if (code === 'quota_exceeded') return 'พื้นที่เก็บข้อมูลเต็ม ลบเอกสารเก่าที่ไม่ใช้ก่อนแล้วลองใหม่';
+  if (code === 'permission-denied') return fbReadOnly() ? 'คุณมีสิทธิ์ดูอย่างเดียวในบริษัทนี้' : 'คุณไม่มีสิทธิ์ทำรายการนี้';
   if (code === 'invalid_argument') return 'คุณไม่มีสิทธิ์แก้ไขข้อมูลในหน้านี้ ขอสิทธิ์ Contributor จากเจ้าของ';
   return 'บันทึกไม่สำเร็จ ลองอีกครั้ง';
 }
@@ -272,7 +276,7 @@ function localSave() {
 window.addEventListener('pagehide', function() { if (_lsT) localFlush(); });
 function onData() {
   localSave();
-  if (dbReady && STORE.accounts.length && (!STORE.accounts.some(function(a) { return a.code === '2125'; }) || STORE.accounts.some(function(a) { return (a.code === '2125' || a.code === '1155') && /ยังไม่ถึงกำหนด/.test(a.name); }))) setTimeout(ensureVatAccounts, 0);
+  if (dbReady && !fbReadOnly() && STORE.accounts.length && (!STORE.accounts.some(function(a) { return a.code === '2125'; }) || STORE.accounts.some(function(a) { return (a.code === '2125' || a.code === '1155') && /ยังไม่ถึงกำหนด/.test(a.name); }))) setTimeout(ensureVatAccounts, 0);
   if (typeof applyCompany === 'function') applyCompany();
   renderDatalists();
   renderDashboard();
