@@ -1,7 +1,7 @@
 /* ================= Firebase: Login + shared database (ใช้เมื่อกำหนด FIREBASE_CONFIG ใน src/config.js) ================= */
 var FB = null, FB_MODE = false, CUR_ROLE = null, FB_NEW_CO = null, _fbRoleUnsub = null;
 var FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
-var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู' };
+var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู', removed:'ถูกนำออก', none:'-' };
 function fbConfigured() { return typeof FIREBASE_CONFIG !== 'undefined' && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey); }
 function fbReadOnly() { return FB_MODE && CUR_ROLE === 'viewer'; }
 function fbEmail() { return FB && FB.user ? String(FB.user.email || '').toLowerCase() : ''; }
@@ -101,10 +101,18 @@ async function fbMyCompanies() {
   var qs = await FB.fs.collection('companies').where('memberIds', 'array-contains', FB.user.uid).get();
   return qs.docs.map(function(d) { var o = Object.assign({}, d.data()); o._id = d.id; return o; }).sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
 }
+// every change to companies/{co}/members goes with an audit entry in the same batch (enforced by firestore.rules)
+function fbAudit(b, co, action, target, fromRole, toRole, grantedBy) {
+  var ref = FB.fs.collection('companies/' + co + '/audit').doc(), a = { action: action, actorUid: FB.user.uid, actorEmail: fbEmail(), targetUid: target.uid, targetEmail: target.email || '', fromRole: fromRole, toRole: toRole, at: firebase.firestore.FieldValue.serverTimestamp() };
+  if (grantedBy) a.grantedBy = grantedBy;
+  b.set(ref, a);
+  return ref.id;
+}
 async function fbCreateCompany(id, name, taxId) {
-  var fs = FB.fs, u = FB.user, b = fs.batch();
+  var fs = FB.fs, u = FB.user, b = fs.batch(), me = { uid: u.uid, email: fbEmail() };
   b.set(fs.doc('companies/' + id), { name: name, taxId: taxId || '', createdAt: Date.now(), ownerId: u.uid, memberIds: [u.uid] });
-  b.set(fs.doc('companies/' + id + '/members/' + u.uid), { role: 'owner', email: fbEmail(), addedAt: Date.now() });
+  var aid = fbAudit(b, id, 'create', me, 'none', 'owner');
+  b.set(fs.doc('companies/' + id + '/members/' + u.uid), { role: 'owner', email: me.email, addedAt: Date.now(), auditId: aid });
   await b.commit();
 }
 // invites need a verified email, otherwise anyone could sign up with an invited address
@@ -114,15 +122,20 @@ async function fbAcceptInvites() {
   var qs;
   try { qs = await FB.fs.collection('invites').where('email', '==', fbEmail()).get(); } catch (e) { return names; }
   for (var i = 0; i < qs.docs.length; i++) {
-    var d = qs.docs[i], inv = d.data(), fs = FB.fs, b = fs.batch();
-    b.set(fs.doc('companies/' + inv.coId + '/members/' + u.uid), { role: inv.role, email: fbEmail(), addedAt: Date.now() });
-    b.update(fs.doc('companies/' + inv.coId), { memberIds: firebase.firestore.FieldValue.arrayUnion(u.uid) });
-    b.delete(d.ref);
-    try { await b.commit(); names.push(inv.coName || inv.coId); }
-    catch (e) { try { await d.ref.delete(); } catch (e2) {} } // already a member or invite revoked
+    var d = qs.docs[i], inv = d.data(), fs = FB.fs, b = fs.batch(), mref = fs.doc('companies/' + inv.coId + '/members/' + u.uid);
+    try {
+      var cur = await mref.get(), before = cur.exists ? cur.data().role : 'none';
+      if (before !== 'none' && before !== 'removed') throw new Error('already a member');
+      var aid = fbAudit(b, inv.coId, 'join', { uid: u.uid, email: fbEmail() }, before, inv.role, inv.invitedByUid);
+      b.set(mref, { role: inv.role, email: fbEmail(), addedAt: Date.now(), auditId: aid });
+      b.update(fs.doc('companies/' + inv.coId), { memberIds: firebase.firestore.FieldValue.arrayUnion(u.uid) });
+      b.delete(d.ref);
+      await b.commit(); names.push(inv.coName || inv.coId);
+    } catch (e) { try { await d.ref.delete(); } catch (e2) {} } // already a member or invite revoked
   }
   return names;
 }
+function fbPrimaryOwner() { var c = COMPANIES.find(function(x) { return x._id === CUR_CO; }); return c ? c.ownerId : null; }
 function fbWatchRole() {
   if (_fbRoleUnsub) { try { _fbRoleUnsub(); } catch (e) {} }
   CUR_ROLE = null; fbRoleBadge();
@@ -130,9 +143,9 @@ function fbWatchRole() {
   var removed = function() { if (co !== CUR_CO) return; showToast('คุณถูกนำออกจากบริษัทนี้แล้ว'); setTimeout(function() { location.reload(); }, 1500); };
   _fbRoleUnsub = FB.fs.doc('companies/' + co + '/members/' + FB.user.uid).onSnapshot(function(s) {
     if (co !== CUR_CO) return;
-    if (!s.exists) return removed();
+    if (!s.exists || s.data().role === 'removed') return removed();
     CUR_ROLE = s.data().role; fbRoleBadge();
-  }, function(e) { if (e && e.code === 'permission-denied') removed(); }); // reading our own member doc is denied once removed
+  }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
 function fbRoleBadge() {
   var el = byId('roleBadge');
@@ -146,10 +159,11 @@ function fbAvatar() {
   av.onclick = fbOpenAccount; av.onkeydown = function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fbOpenAccount(); } };
 }
 function fbSignOut() { FB.auth.signOut().then(function() { location.reload(); }); }
+function fbRoleText(uid, role) { return uid && uid === fbPrimaryOwner() ? 'เจ้าของหลัก' : (ROLE_LABEL[role] || role || '-'); }
 function fbOpenAccount() {
   var u = FB.user;
   var body = '<div style="line-height:1.9"><div><span class="muted">อีเมล</span> <b>' + esc(fbEmail()) + '</b> ' + (u.emailVerified ? '<span class="status st-paid">ยืนยันแล้ว</span>' : '<span class="status st-overdue">ยังไม่ยืนยัน</span>') + '</div>' +
-    '<div><span class="muted">บริษัทปัจจุบัน</span> ' + esc(companyName()) + '</div><div><span class="muted">สิทธิ์ของคุณ</span> ' + esc(ROLE_LABEL[CUR_ROLE] || '-') + '</div></div>' +
+    '<div><span class="muted">บริษัทปัจจุบัน</span> ' + esc(companyName()) + '</div><div><span class="muted">สิทธิ์ของคุณ</span> ' + esc(fbRoleText(u.uid, CUR_ROLE)) + '</div></div>' +
     (u.emailVerified ? '' : '<div class="banner info" style="margin:10px 0 0">ยืนยันอีเมลเพื่อรับคำเชิญเข้าบริษัทอื่น <button type="button" class="linkish" id="accResend">ส่งอีเมลยืนยันอีกครั้ง</button></div>');
   openModal({ title:'บัญชีผู้ใช้', focus:false, body: body, buttons:[
     { label:'ออกจากระบบ', cls:'btn-outline', left:true, onClick: fbSignOut },
@@ -159,39 +173,69 @@ function fbOpenAccount() {
 }
 
 /* ---- Users & roles of the current company ---- */
+var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก' };
 function fbOpenMembers() {
   openModal({ title:'จัดการผู้ใช้', focus:false, body:'<div id="mbBody" class="muted">กำลังโหลด…</div>', buttons:[{ label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
   fbRenderMembers();
 }
 async function fbRenderMembers() {
-  var co = CUR_CO, owner = CUR_ROLE === 'owner', fs = FB.fs, me = FB.user.uid, ms, inv = [];
+  var co = CUR_CO, owner = CUR_ROLE === 'owner', fs = FB.fs, me = FB.user.uid, ms, inv = [], log = [], primary;
   try {
-    ms = (await fs.collection('companies/' + co + '/members').get()).docs.map(function(d) { return Object.assign({ uid: d.id }, d.data()); });
-    if (owner) inv = (await fs.collection('invites').where('coId', '==', co).get()).docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    primary = (await fs.doc('companies/' + co).get()).data().ownerId;
+    ms = (await fs.collection('companies/' + co + '/members').get()).docs.map(function(d) { return Object.assign({ uid: d.id }, d.data()); }).filter(function(m) { return m.role !== 'removed'; });
+    if (owner) {
+      inv = (await fs.collection('invites').where('coId', '==', co).get()).docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+      log = (await fs.collection('companies/' + co + '/audit').orderBy('at', 'desc').limit(50).get()).docs.map(function(d) { return d.data(); });
+    }
   } catch (e) { var h0 = byId('mbBody'); if (h0) h0.textContent = 'โหลดรายชื่อผู้ใช้ไม่สำเร็จ'; return; }
   var host = byId('mbBody'); if (!host || co !== CUR_CO) return;
   host.className = '';
+  var iAmPrimary = primary === me;
   var roleSel = function(attr, cur, opts) { return '<select ' + attr + '>' + opts.map(function(r) { return '<option value="' + r + '"' + (r === cur ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>'; }).join('') + '</select>'; };
-  ms.sort(function(a, b) { return (a.addedAt || 0) - (b.addedAt || 0); });
-  host.innerHTML = '<ul class="small muted" style="margin:0 0 12px;padding-left:20px;line-height:1.8"><li><b>เจ้าของ</b> ทำได้ทุกอย่าง รวมถึงเชิญและกำหนดสิทธิ์ผู้ใช้</li><li><b>ผู้แก้ไข</b> สร้างและแก้ไขเอกสาร ผังบัญชี และข้อมูลทั้งหมด</li><li><b>ผู้ดู</b> ดูข้อมูลและรายงานได้อย่างเดียว</li></ul>' +
+  var roleName = function(uid, r) { return uid === primary ? 'เจ้าของหลัก' : (ROLE_LABEL[r] || r); };
+  var fmtAt = function(t) { return t && t.toDate ? t.toDate().toLocaleString('th-TH') : '-'; };
+  ms.sort(function(a, b) { return (a.uid === primary ? -1 : b.uid === primary ? 1 : 0) || (a.addedAt || 0) - (b.addedAt || 0); });
+  host.innerHTML = '<ul class="small muted" style="margin:0 0 12px;padding-left:20px;line-height:1.8"><li><b>เจ้าของหลัก</b> ผู้สร้างบริษัท ไม่มีใครลดสิทธิ์หรือนำออกได้ เปลี่ยนได้ด้วยการโอนสิทธิ์เท่านั้น</li><li><b>เจ้าของ</b> ทำได้ทุกอย่าง รวมถึงเชิญและกำหนดสิทธิ์ผู้ใช้</li><li><b>ผู้แก้ไข</b> สร้างและแก้ไขเอกสาร ผังบัญชี และข้อมูลทั้งหมด</li><li><b>ผู้ดู</b> ดูข้อมูลและรายงานได้อย่างเดียว</li></ul>' +
     '<div class="items-wrap"><table class="data-table"><thead><tr><th>อีเมล</th><th>สิทธิ์</th><th></th></tr></thead><tbody>' +
     ms.map(function(m) {
-      var self = m.uid === me;
-      return '<tr><td>' + esc(m.email || m.uid) + (self ? ' <span class="muted small">(คุณ)</span>' : '') + '</td><td>' + (owner && !self ? roleSel('data-mbrole="' + esc(m.uid) + '"', m.role, ['owner', 'editor', 'viewer']) : esc(ROLE_LABEL[m.role] || m.role)) + '</td><td>' + (owner && !self ? '<button type="button" class="linkish" data-mbdel="' + esc(m.uid) + '">นำออก</button>' : '') + '</td></tr>';
+      var self = m.uid === me, locked = self || m.uid === primary || !owner;
+      return '<tr><td>' + esc(m.email || m.uid) + (self ? ' <span class="muted small">(คุณ)</span>' : '') + '</td><td>' + (locked ? esc(roleName(m.uid, m.role)) : roleSel('data-mbrole="' + esc(m.uid) + '"', m.role, ['owner', 'editor', 'viewer'])) + '</td><td style="white-space:nowrap">' +
+        (locked ? '' : '<button type="button" class="linkish" data-mbdel="' + esc(m.uid) + '">นำออก</button>') +
+        (iAmPrimary && !self ? (locked ? '' : ' · ') + '<button type="button" class="linkish" data-mbxfer="' + esc(m.uid) + '">โอนสิทธิ์เจ้าของหลัก</button>' : '') + '</td></tr>';
     }).join('') + '</tbody></table></div>' +
     (owner ?
       '<h3 style="margin:18px 0 8px;font-size:15px">เชิญผู้ใช้</h3><div class="grid-2"><div class="field"><label for="mbEmail">อีเมล</label><input id="mbEmail" type="email" autocomplete="off" placeholder="name@example.com"></div><div class="field"><label for="mbRole">สิทธิ์</label>' + roleSel('id="mbRole"', 'editor', ['editor', 'viewer']) + '</div></div>' +
       '<div class="toolbar"><button type="button" class="btn btn-dark" id="mbInvite">เชิญ</button></div><div class="form-error" id="formError" hidden></div>' +
       '<p class="small muted" style="margin:6px 0 0">ระบบไม่ได้ส่งอีเมลเชิญให้ แจ้งผู้ใช้ให้สมัครสมาชิกด้วยอีเมลนี้และกดยืนยันอีเมล แล้วบริษัทนี้จะปรากฏให้อัตโนมัติเมื่อเข้าสู่ระบบ</p>' +
-      (inv.length ? '<h3 style="margin:18px 0 8px;font-size:15px">คำเชิญที่รอตอบรับ</h3><div class="items-wrap"><table class="data-table"><tbody>' + inv.map(function(x) { return '<tr><td>' + esc(x.email) + '</td><td>' + esc(ROLE_LABEL[x.role] || x.role) + '</td><td><button type="button" class="linkish" data-mbrevoke="' + esc(x.id) + '">ยกเลิกคำเชิญ</button></td></tr>'; }).join('') + '</tbody></table></div>' : '')
+      (inv.length ? '<h3 style="margin:18px 0 8px;font-size:15px">คำเชิญที่รอตอบรับ</h3><div class="items-wrap"><table class="data-table"><tbody>' + inv.map(function(x) { return '<tr><td>' + esc(x.email) + '</td><td>' + esc(ROLE_LABEL[x.role] || x.role) + '</td><td><button type="button" class="linkish" data-mbrevoke="' + esc(x.id) + '">ยกเลิกคำเชิญ</button></td></tr>'; }).join('') + '</tbody></table></div>' : '') +
+      '<h3 style="margin:18px 0 8px;font-size:15px">ประวัติการเปลี่ยนสิทธิ์</h3>' + (log.length ? '<div class="items-wrap"><table class="data-table" id="mbAudit"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>รายการ</th><th>ผู้ใช้</th><th>สิทธิ์</th></tr></thead><tbody>' +
+        log.map(function(a) { return '<tr><td class="small">' + esc(fmtAt(a.at)) + '</td><td>' + esc(a.actorEmail) + '</td><td>' + esc(AUDIT_LABEL[a.action] || a.action) + '</td><td>' + esc(a.targetEmail) + '</td><td class="small">' + esc((ROLE_LABEL[a.fromRole] || a.fromRole) + ' → ' + (ROLE_LABEL[a.toRole] || a.toRole)) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">ยังไม่มีรายการ</p>')
       : '<p class="small muted" style="margin:10px 0 0">เฉพาะเจ้าของบริษัทเท่านั้นที่เชิญหรือเปลี่ยนสิทธิ์ผู้ใช้ได้</p>');
   var fail = function(e) { showToast(writeError(e)); fbRenderMembers(); };
-  host.querySelectorAll('[data-mbrole]').forEach(function(s) { s.onchange = function() { fs.doc('companies/' + co + '/members/' + s.dataset.mbrole).update({ role: s.value }).then(function() { showToast('เปลี่ยนสิทธิ์แล้ว'); }, fail); }; });
-  host.querySelectorAll('[data-mbdel]').forEach(function(b) { b.onclick = function() {
-    var uid = b.dataset.mbdel, m = ms.find(function(x) { return x.uid === uid; });
-    if (!confirm('นำ ' + (m && m.email || uid) + ' ออกจากบริษัทนี้?')) return;
-    var bt = fs.batch(); bt.delete(fs.doc('companies/' + co + '/members/' + uid)); bt.update(fs.doc('companies/' + co), { memberIds: firebase.firestore.FieldValue.arrayRemove(uid) });
-    bt.commit().then(function() { showToast('นำผู้ใช้ออกแล้ว'); fbRenderMembers(); }, fail);
+  var find = function(uid) { return ms.find(function(x) { return x.uid === uid; }); };
+  var mref = function(uid) { return fs.doc('companies/' + co + '/members/' + uid); };
+  host.querySelectorAll('[data-mbrole]').forEach(function(s) { s.onchange = function() {
+    var m = find(s.dataset.mbrole), b = fs.batch(), aid = fbAudit(b, co, 'role', m, m.role, s.value);
+    b.update(mref(m.uid), { role: s.value, auditId: aid });
+    b.commit().then(function() { showToast('เปลี่ยนสิทธิ์แล้ว'); fbRenderMembers(); }, fail);
+  }; });
+  host.querySelectorAll('[data-mbdel]').forEach(function(btn) { btn.onclick = function() {
+    var m = find(btn.dataset.mbdel);
+    if (!confirm('นำ ' + (m.email || m.uid) + ' ออกจากบริษัทนี้?')) return;
+    var b = fs.batch(), aid = fbAudit(b, co, 'remove', m, m.role, 'removed');
+    b.update(mref(m.uid), { role: 'removed', auditId: aid });
+    b.update(fs.doc('companies/' + co), { memberIds: firebase.firestore.FieldValue.arrayRemove(m.uid) });
+    b.commit().then(function() { showToast('นำผู้ใช้ออกแล้ว'); fbRenderMembers(); }, fail);
+  }; });
+  host.querySelectorAll('[data-mbxfer]').forEach(function(btn) { btn.onclick = function() {
+    var m = find(btn.dataset.mbxfer);
+    var typed = prompt('โอนสิทธิ์เจ้าของหลักของ "' + companyName() + '" ให้ ' + m.email + '\n\nหลังโอน คุณจะเป็น "เจ้าของ" และเจ้าของหลักคนใหม่สามารถลดสิทธิ์หรือนำคุณออกได้\nการโอนจะถูกบันทึกในประวัติการเปลี่ยนสิทธิ์\n\nพิมพ์อีเมลของผู้รับเพื่อยืนยัน:');
+    if (typed == null) return;
+    if (typed.trim().toLowerCase() !== String(m.email || '').toLowerCase()) { showToast('อีเมลไม่ตรงกัน ยกเลิกการโอนสิทธิ์'); return; }
+    var b = fs.batch(), aid = fbAudit(b, co, 'transfer', m, m.role, 'owner');
+    b.update(mref(m.uid), { role: 'owner', auditId: aid });
+    b.update(fs.doc('companies/' + co), { ownerId: m.uid });
+    b.commit().then(function() { showToast('โอนสิทธิ์เจ้าของหลักให้ ' + m.email + ' แล้ว'); fbRenderMembers(); }, fail);
   }; });
   host.querySelectorAll('[data-mbrevoke]').forEach(function(b) { b.onclick = function() { fs.doc('invites/' + b.dataset.mbrevoke).delete().then(function() { showToast('ยกเลิกคำเชิญแล้ว'); fbRenderMembers(); }, fail); }; });
   var ib = byId('mbInvite');
@@ -201,7 +245,7 @@ async function fbRenderMembers() {
     if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(email)) { err.textContent = 'อีเมลไม่ถูกต้อง'; err.hidden = false; return; }
     if (ms.some(function(m) { return (m.email || '').toLowerCase() === email; })) { err.textContent = 'ผู้ใช้นี้อยู่ในบริษัทแล้ว'; err.hidden = false; return; }
     ib.disabled = true;
-    try { await fs.doc('invites/' + co + '__' + email).set({ coId: co, coName: companyName(), email: email, role: role, invitedBy: fbEmail(), createdAt: Date.now() }); showToast('บันทึกคำเชิญ ' + email + ' แล้ว'); fbRenderMembers(); }
+    try { await fs.doc('invites/' + co + '__' + email).set({ coId: co, coName: companyName(), email: email, role: role, invitedBy: fbEmail(), invitedByUid: me, createdAt: Date.now() }); showToast('บันทึกคำเชิญ ' + email + ' แล้ว'); fbRenderMembers(); }
     catch (e) { ib.disabled = false; err.textContent = writeError(e); err.hidden = false; }
   };
 }
