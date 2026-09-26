@@ -35,9 +35,10 @@ service cloud.firestore {
           // สร้างบริษัท: ผู้สร้างเป็นเจ้าของหลัก
           (a.action == 'create' && a.targetUid == request.auth.uid && a.toRole == 'owner' && before == 'none'
             && !exists(coPath(co)) && getAfter(coPath(co)).data.ownerId == request.auth.uid)
-          // ตอบรับคำเชิญ: ต้องยืนยันอีเมล และได้สิทธิ์ตามที่เชิญเท่านั้น
+          // ตอบรับคำเชิญ: ต้องยืนยันอีเมล ได้สิทธิ์ตามที่เชิญเท่านั้น และต้องลบคำเชิญใน batch เดียวกัน
+          // (คำเชิญใช้ได้ครั้งเดียว คนที่ถูกนำออกจะกลับเข้ามาด้วยคำเชิญเดิมไม่ได้)
           || (a.action == 'join' && a.targetUid == request.auth.uid && before in ['none', 'removed'] && verified()
-            && exists(invitePath(co)) && get(invitePath(co)).data.role == a.toRole
+            && exists(invitePath(co)) && !existsAfter(invitePath(co)) && get(invitePath(co)).data.role == a.toRole
             && get(invitePath(co)).data.invitedByUid == a.grantedBy)
           // เจ้าของเปลี่ยนสิทธิ์/นำออก สมาชิกคนอื่นที่ไม่ใช่เจ้าของหลัก
           || (a.action in ['role', 'remove'] && isOwner(co) && a.targetUid != request.auth.uid

@@ -244,6 +244,7 @@ async function fbRenderMembers() {
     err.hidden = true;
     if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(email)) { err.textContent = 'อีเมลไม่ถูกต้อง'; err.hidden = false; return; }
     if (ms.some(function(m) { return (m.email || '').toLowerCase() === email; })) { err.textContent = 'ผู้ใช้นี้อยู่ในบริษัทแล้ว'; err.hidden = false; return; }
+    if (inv.some(function(x) { return x.email === email; })) { err.textContent = 'มีคำเชิญค้างอยู่แล้วสำหรับอีเมลนี้ ยกเลิกคำเชิญเดิมก่อนถ้าต้องการเปลี่ยนสิทธิ์'; err.hidden = false; return; }
     ib.disabled = true;
     try { await fs.doc('invites/' + co + '__' + email).set({ coId: co, coName: companyName(), email: email, role: role, invitedBy: fbEmail(), invitedByUid: me, createdAt: Date.now() }); showToast('บันทึกคำเชิญ ' + email + ' แล้ว'); fbRenderMembers(); }
     catch (e) { ib.disabled = false; err.textContent = writeError(e); err.hidden = false; }
