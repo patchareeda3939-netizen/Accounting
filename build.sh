@@ -12,4 +12,6 @@ mkdir -p dist
 } > dist/index.html
 # ไฟล์สำหรับเผยแพร่เป็น Claude Artifact (ไม่มี doctype/head ระบบใส่ให้เอง)
 { cat src/shell.html; echo '<script>'; cat src/part*.js; echo '</script>'; } > dist/artifact.html
+# สำเนาที่ root สำหรับ GitHub Pages
+cp dist/index.html index.html
 echo "built dist/index.html ($(wc -c < dist/index.html) bytes)"

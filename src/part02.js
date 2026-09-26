@@ -184,7 +184,7 @@ async function initDb() {
   try { db = (window.claude && window.claude.use) ? await window.claude.use('db') : null; } catch (e) { db = null; }
   dbReady = true;
   byId('modeBadge').hidden = !!db;
-  if (!db) { localLoad(); onData(); return; }
+  if (!db) { localLoadCompanies(); localLoad(); onData(); return; }
   try { db.collection('companies').orderBy('createdAt', 'asc').limit(200).onSnapshot(function(snap) { COMPANIES = snap.docs.map(function(d) { var o = Object.assign({}, d.data()); o._id = d.id; return o; }); if (typeof renderCoSwitch === 'function') renderCoSwitch(); }); } catch (e) {}
   subscribeAll();
 }
@@ -205,7 +205,7 @@ function subscribe(coll, field, dir) {
 }
 function switchCompany(id) {
   if (id === CUR_CO) return;
-  if (!db) { localSave(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] }; }
+  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] }; }
   else SUBS.forEach(function(s) { STORE[s[0]] = []; });
   CUR_CO = id; try { localStorage.setItem('psm_company', id); } catch (e) {}
   if (!db && !LOCAL_CO[id]) localLoad();
@@ -244,15 +244,32 @@ function findDoc(id) { return STORE.documents.find(function(d) { return d._id ==
 
 // standalone mode (no Claude database, e.g. GitHub Pages): keep data in this browser's localStorage
 function localKey() { return 'psmacc_data_' + CUR_CO; }
+// localSeq only grows so ids stay unique when switching back to a company already in memory
 function localLoad() {
-  try { var s = JSON.parse(localStorage.getItem(localKey()) || 'null'); if (s) { Object.keys(STORE).forEach(function(k) { if (Array.isArray(s[k])) STORE[k] = s[k]; }); localSeq = s._seq || 1000; }
-    var cs = JSON.parse(localStorage.getItem('psmacc_companies') || 'null'); if (Array.isArray(cs)) COMPANIES = cs; } catch (e) {}
+  try { var s = JSON.parse(localStorage.getItem(localKey()) || 'null'); if (s) { Object.keys(STORE).forEach(function(k) { if (Array.isArray(s[k])) STORE[k] = s[k]; }); localSeq = Math.max(localSeq, s._seq || 1000); } } catch (e) {}
 }
-var _lsT = null;
+// the company list is read once at startup; afterwards memory is the source of truth
+function localLoadCompanies() {
+  try { var cs = JSON.parse(localStorage.getItem('psmacc_companies') || 'null'); if (Array.isArray(cs)) COMPANIES = cs; } catch (e) {}
+}
+var _lsT = null, _lsFailed = false;
+function localFlush() {
+  clearTimeout(_lsT); _lsT = null;
+  if (db || !dbReady) return;
+  try {
+    var o = Object.assign({ _seq: localSeq }, STORE);
+    localStorage.setItem(localKey(), JSON.stringify(o)); localStorage.setItem('psmacc_companies', JSON.stringify(COMPANIES));
+    _lsFailed = false;
+  } catch (e) {
+    if (!_lsFailed) showToast('บันทึกข้อมูลลงเบราว์เซอร์ไม่สำเร็จ (พื้นที่อาจเต็ม) กรุณาสำรองข้อมูลบริษัททันที');
+    _lsFailed = true;
+  }
+}
 function localSave() {
   if (db || !dbReady) return;
-  clearTimeout(_lsT); _lsT = setTimeout(function() { try { var o = Object.assign({ _seq: localSeq }, STORE); localStorage.setItem(localKey(), JSON.stringify(o)); localStorage.setItem('psmacc_companies', JSON.stringify(COMPANIES)); } catch (e) {} }, 300);
+  clearTimeout(_lsT); _lsT = setTimeout(localFlush, 300);
 }
+window.addEventListener('pagehide', function() { if (_lsT) localFlush(); });
 function onData() {
   localSave();
   if (dbReady && STORE.accounts.length && (!STORE.accounts.some(function(a) { return a.code === '2125'; }) || STORE.accounts.some(function(a) { return (a.code === '2125' || a.code === '1155') && /ยังไม่ถึงกำหนด/.test(a.name); }))) setTimeout(ensureVatAccounts, 0);

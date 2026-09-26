@@ -1,6 +1,6 @@
 /* ================= Settings (gear) ================= */
 function companySettings() { return STORE.settings.find(function(s) { return s._id === 'company'; }) || {}; }
-function companyName() { return companySettings().name || 'NPD-BKK'; }
+function companyName() { return companySettings().name || 'บริษัทของฉัน'; }
 function applyCompany() {
   if (typeof renderCoSwitch === 'function') renderCoSwitch(); else { var el = byId('companyPill'); if (el) el.textContent = companyName(); }
   if (typeof syncCompanyRegistry === 'function') syncCompanyRegistry();
