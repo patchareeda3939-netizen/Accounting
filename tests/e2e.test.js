@@ -167,6 +167,8 @@ async function verify(email) {
   ok('editor deletes branch without history', await e.evaluate(() => !STORE.branches.some(b => b.code === '00003')));
 
   // ---- period lock: editor locks, cannot unlock; owner unlocks; every change audited
+  await e.evaluate(async () => { await addRec('documents', { type: 'invoice', typeLabel: 'ใบแจ้งหนี้', group: 'customer', docNo: 'LK-1', party: 'A', date: '2026-08-15', items: [], total: 100, net: 100, payments: [], status: 'unpaid', extra: {}, createdAt: Date.now() }); });
+  await e.waitForTimeout(600);
   const eLock = await e.evaluate(async () => { await lockPeriod('2026-08-31'); await new Promise(r => setTimeout(r, 800)); return lockDate(); });
   ok('editor locks period', eLock === '2026-08-31', eLock);
   await e.evaluate(() => { mc.ym = '2026-08'; go('accounting', 'monthClose'); }); await e.waitForTimeout(800);
@@ -179,12 +181,22 @@ async function verify(email) {
   ok('editor cannot move lock date backwards', eBack === 'permission-denied', eBack);
   const eDocLocked = await e.evaluate(async () => { try { await saveSettings('company', { lockDate: '2026-12-31' }); return 'ok'; } catch (x) { return x.code; } });
   ok('lock date change without audit entry denied', eDocLocked === 'permission-denied', eDocLocked);
+  const eLkEdit = await e.evaluate(async () => { const d = STORE.documents.find(x => x.docNo === 'LK-1'); try { await setRec('documents', d._id, Object.assign(strip(d), { total: 999 })); return 'ok'; } catch (x) { return writeError(x); } });
+  ok('editor: editing a transaction in locked period is refused with a lock message', /งวดบัญชีที่ล็อกแล้ว/.test(eLkEdit), eLkEdit);
+  const eLkDirect = await e.evaluate(async () => { const d = STORE.documents.find(x => x.docNo === 'LK-1'); const r = FB.fs.doc('companies/' + CUR_CO + '/documents/' + d._id); const out = {}; for (const [k, f] of [['update', () => r.update({ total: 1 })], ['delete', () => r.delete()], ['create', () => FB.fs.collection('companies/' + CUR_CO + '/documents').add({ type: 'invoice', date: '2026-08-02', total: 1 })]]) { try { await f(); out[k] = 'ok'; } catch (x) { out[k] = x.code; } } return out; });
+  ok('editor: direct Firestore create/update/delete in locked period denied', eLkDirect.update === 'permission-denied' && eLkDirect.delete === 'permission-denied' && eLkDirect.create === 'permission-denied', eLkDirect);
+  const eLkPay = await e.evaluate(async () => { const d = STORE.documents.find(x => x.docNo === 'LK-1'); try { await setRec('documents', d._id, Object.assign(strip(d), { payments: [{ date: '2026-09-05', amount: 40 }], status: 'partial', updatedAt: Date.now() })); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor: payment dated after the lock can be recorded on a locked invoice', eLkPay === 'ok', eLkPay);
+  const oLkEdit = await o.evaluate(async () => { const d = STORE.documents.find(x => x.docNo === 'LK-1'); try { await setRec('documents', d._id, Object.assign(strip(d), { total: 555 })); return 'ok'; } catch (x) { return x.code; } });
+  ok('owner: editing a locked transaction is also refused until unlocked', oLkEdit === 'permission-denied', oLkEdit);
   const vLock = await v.evaluate(async () => { try { await fbSetLockDate('2026-10-31', 'period_lock'); return 'ok'; } catch (x) { return x.code; } });
   ok('viewer cannot lock period', vLock === 'permission-denied', vLock);
   await o.evaluate(() => { mc.ym = '2026-08'; go('accounting', 'monthClose'); }); await o.waitForTimeout(800);
   ok('owner sees unlock button', await o.evaluate(() => [...document.querySelectorAll('[data-mcgo]')].some(b => /unlockPeriod/.test(b.dataset.mcgo))));
   await o.evaluate(() => unlockPeriod()); await o.waitForTimeout(1000);
   ok('owner unlocks period', await o.evaluate(() => lockDate()) === '');
+  const oAfter = await o.evaluate(async () => { await new Promise(r => setTimeout(r, 500)); const d = STORE.documents.find(x => x.docNo === 'LK-1'); try { await setRec('documents', d._id, Object.assign(strip(d), { total: 120 })); return 'ok'; } catch (x) { return x.code; } });
+  ok('owner: back-dated edit allowed after unlocking', oAfter === 'ok', oAfter);
   const eVat = await e.evaluate(async () => { try { await saveSettings('company', { vatRegistered: 'no' }); return 'ok'; } catch (x) { return x.code; } });
   ok('editor cannot change VAT status', eVat === 'permission-denied', eVat);
   await e.evaluate(() => { openCompanySettings(); });

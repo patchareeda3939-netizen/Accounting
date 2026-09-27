@@ -293,6 +293,66 @@ await expect('audit log records who, when and which period for every lock/unlock
 await expect('User E: cannot read audit log', 'deny', () => getDocs(collection(E.db, 'companies/co1/audit')));
 await lock(A, '', 'period_unlock');
 
+S('R15', 'งวดที่ล็อก: ห้ามสร้าง/แก้/ลบ transaction ในงวดนั้นแม้ยิงตรงเข้า Firestore (ทุกบทบาท ต้องปลดล็อกก่อน)');
+const dref = (u, id) => doc(u.db, `companies/co1/documents/${id}`);
+const tref = (u, id) => doc(u.db, `companies/co1/taxReturns/${id}`);
+const mkDoc = (u, id, date, extra = {}) => setDoc(dref(u, id), { type: 'invoice', docNo: id, date, total: 100, net: 100, payments: [], status: 'unpaid', ...extra });
+// data before locking
+await mkDoc(E, 'lk-jul', '2026-07-15'); await mkDoc(E, 'lk-aug', '2026-08-20'); await mkDoc(E, 'lk-aug31', '2026-08-31'); await mkDoc(E, 'lk-sep', '2026-09-10');
+await mkDoc(E, 'lk-paid', '2026-08-05', { status: 'paid', paidDate: '2026-08-06' });
+await setDoc(tref(E, 'vat-2026-08'), { period: '2026-08', adjustments: [], payments: [] }); await setDoc(tref(E, 'vat-2026-09'), { period: '2026-09', adjustments: [], payments: [] });
+await lock(E, '2026-08-31', 'period_lock');
+const W3 = [['Primary Owner A', A], ['Admin C', C], ['User E', E]];
+for (const [r, u] of W3) {
+  const k = r.split(' ').pop();
+  await expect(`${r}: create transaction dated in locked period`, 'deny', () => mkDoc(u, 'n1-' + k, '2026-08-15'));
+  await expect(`${r}: create transaction on the lock date (boundary)`, 'deny', () => mkDoc(u, 'n2-' + k, '2026-08-31'));
+  await expect(`${r}: create transaction without a date`, 'deny', () => setDoc(dref(u, 'n3-' + k), { type: 'invoice', total: 1 }));
+  await expect(`${r}: create transaction the day after the lock`, 'allow', () => mkDoc(u, 'n4-' + k, '2026-09-01'));
+  await expect(`${r}: edit amount of locked transaction`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { total: 999 }));
+  await expect(`${r}: overwrite locked transaction`, 'deny', () => mkDoc(u, 'lk-aug', '2026-08-20', { total: 5 }));
+  await expect(`${r}: void locked transaction`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { voided: true, voidReason: 'x' }));
+  await expect(`${r}: move locked transaction out of the period`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { date: '2026-09-05' }));
+  await expect(`${r}: move open transaction into the locked period`, 'deny', () => updateDoc(dref(u, 'lk-sep'), { date: '2026-08-10' }));
+  await expect(`${r}: delete locked transaction`, 'deny', () => deleteDoc(dref(u, 'lk-jul')));
+  await expect(`${r}: delete transaction on the lock date`, 'deny', () => deleteDoc(dref(u, 'lk-aug31')));
+  await expect(`${r}: edit open transaction`, 'allow', () => updateDoc(dref(u, 'lk-sep'), { total: 100 + k.length }));
+  await expect(`${r}: delete open transaction`, 'allow', () => deleteDoc(dref(u, 'n4-' + k)));
+  await expect(`${r}: receive payment (dated in open period) on locked invoice`, 'allow', () => updateDoc(dref(u, 'lk-aug'), { payments: arrayUnion({ date: '2026-09-20', amount: 10, by: k }), status: 'partial', updatedAt: 1 }));
+  await expect(`${r}: remove that open-period payment again`, 'allow', () => updateDoc(dref(u, 'lk-aug'), { payments: arrayRemove({ date: '2026-09-20', amount: 10, by: k }), status: 'unpaid' }));
+  await expect(`${r}: add payment dated in locked period to locked invoice`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { payments: arrayUnion({ date: '2026-08-25', amount: 10 }) }));
+  await expect(`${r}: add payment dated in locked period to open invoice`, 'deny', () => updateDoc(dref(u, 'lk-sep'), { payments: arrayUnion({ date: '2026-08-25', amount: 10 }) }));
+  await expect(`${r}: payment on locked invoice plus another field change`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { payments: arrayUnion({ date: '2026-09-21', amount: 1 }), total: 1 }));
+  await expect(`${r}: create open transaction carrying a locked-period payment`, 'deny', () => mkDoc(u, 'n5-' + k, '2026-09-02', { payments: [{ date: '2026-08-01', amount: 1 }] }));
+  await expect(`${r}: mark locked invoice paid with paidDate in open period`, 'allow', () => updateDoc(dref(u, 'lk-aug'), { status: 'paid', paidDate: '2026-09-30' }));
+  await expect(`${r}: mark it unpaid again`, 'allow', () => updateDoc(dref(u, 'lk-aug'), { status: 'unpaid', paidDate: null }));
+  await expect(`${r}: mark locked invoice paid with paidDate in locked period`, 'deny', () => updateDoc(dref(u, 'lk-aug'), { status: 'paid', paidDate: '2026-08-30' }));
+  await expect(`${r}: reverse a payment made in locked period (paidDate)`, 'deny', () => updateDoc(dref(u, 'lk-paid'), { status: 'unpaid', paidDate: null }));
+  await expect(`${r}: edit VAT return of locked month`, 'deny', () => updateDoc(tref(u, 'vat-2026-08'), { adjustments: [{ amount: 1 }] }));
+  await expect(`${r}: record payment (open period) on VAT return of locked month`, 'allow', () => updateDoc(tref(u, 'vat-2026-08'), { payments: arrayUnion({ date: '2026-09-15', amount: 1, by: k }) }));
+  await expect(`${r}: create VAT return for a locked month`, 'deny', () => setDoc(tref(u, 'vat-2026-07-' + k), { period: '2026-07', payments: [] }));
+  await expect(`${r}: delete VAT return of locked month`, 'deny', () => deleteDoc(tref(u, 'vat-2026-08')));
+  await expect(`${r}: edit VAT return of open month`, 'allow', () => updateDoc(tref(u, 'vat-2026-09'), { adjustments: [{ amount: k.length }] }));
+}
+await expect('Viewer V: create transaction in open period', 'deny', () => mkDoc(V, 'nv', '2026-09-05'));
+await expect('Viewer V: edit locked transaction', 'deny', () => updateDoc(dref(V, 'lk-aug'), { total: 1 }));
+await expect('Viewer V: delete locked transaction', 'deny', () => deleteDoc(dref(V, 'lk-aug')));
+await expect('B (other company): edit co1 transaction', 'deny', () => updateDoc(dref(B, 'lk-sep'), { total: 1 }));
+await expect('more than 10 payment changes in one write while locked (limit)', 'deny', () => updateDoc(dref(E, 'lk-sep'), { payments: Array.from({ length: 11 }, (_, i) => ({ date: '2026-09-2' + (i % 9), amount: i })) }));
+// bypass attempts through the lock itself
+await expect('User E: unlock + edit locked transaction in one batch', 'deny', async () => { const b = writeBatch(E.db); const ref = doc(collection(E.db, 'companies/co1/audit')); b.set(ref, { action: 'period_unlock', actorUid: E.uid, actorEmail: E.email, fromDate: curLock, toDate: '', at: serverTimestamp() }); b.set(sc(E), { lockDate: '', lockAuditId: ref.id }, { merge: true }); b.update(dref(E, 'lk-aug'), { total: 1 }); await b.commit(); });
+await expect('User E: clear lockDate without audit + edit in one batch', 'deny', async () => { const b = writeBatch(E.db); b.set(sc(E), { lockDate: '' }, { merge: true }); b.update(dref(E, 'lk-aug'), { total: 1 }); await b.commit(); });
+await expect('User E: delete settings/company to drop the lock', 'deny', () => deleteDoc(sc(E)));
+await expect('User E: lock further + edit newly locked transaction in one batch', 'deny', async () => { const b = writeBatch(E.db); const ref = doc(collection(E.db, 'companies/co1/audit')); b.set(ref, { action: 'period_lock', actorUid: E.uid, actorEmail: E.email, fromDate: curLock, toDate: '2026-09-30', at: serverTimestamp() }); b.set(sc(E), { lockDate: '2026-09-30', lockAuditId: ref.id }, { merge: true }); b.update(dref(E, 'lk-sep'), { total: 7 }); await b.commit(); });
+await expect('locked transaction unchanged after all attempts', 'allow', async () => { const d = (await getDoc(dref(A, 'lk-aug'))).data(); if (d.total !== 100 || d.date !== '2026-08-20' || d.voided || d.status !== 'unpaid') throw new Error(JSON.stringify(d)); });
+// owner unlocks (audited) → then back-dated edits are possible
+await expect('Admin C: unlock back to 2026-07-31 (audited)', 'allow', () => lock(C, '2026-07-31', 'period_unlock'));
+await expect('User E: edit August transaction after Admin unlocked August', 'allow', () => updateDoc(dref(E, 'lk-aug'), { total: 150 }));
+await expect('Primary Owner A: edit August transaction after unlock', 'allow', () => updateDoc(dref(A, 'lk-aug'), { total: 160 }));
+await expect('User E: July is still locked', 'deny', () => updateDoc(dref(E, 'lk-jul'), { total: 1 }));
+await expect('Primary Owner A: unlock + edit July in one batch (audited)', 'allow', async () => { const b = writeBatch(A.db); const ref = doc(collection(A.db, 'companies/co1/audit')); b.set(ref, { action: 'period_unlock', actorUid: A.uid, actorEmail: A.email, fromDate: curLock, toDate: '', at: serverTimestamp() }); b.set(sc(A), { lockDate: '', lockAuditId: ref.id }, { merge: true }); b.update(dref(A, 'lk-jul'), { total: 70 }); await b.commit(); curLock = ''; });
+await expect('audit log shows the lock and both unlocks', 'allow', async () => { const a = (await getDocs(query(collection(A.db, 'companies/co1/audit'), orderBy('at', 'desc'), limit(3)))).docs.map(d => d.data()).map(x => [x.action, x.actorUid === A.uid ? 'A' : x.actorUid === C.uid ? 'C' : x.actorUid === E.uid ? 'E' : '?', x.fromDate, x.toDate].join('|')); if (a.join(' ; ') !== 'period_unlock|A|2026-07-31| ; period_unlock|C|2026-08-31|2026-07-31 ; period_lock|E||2026-08-31') throw new Error(a.join(' ; ')); });
+
 S('R5', 'Co-owner (Admin) ห้ามลดสิทธิ์หรือนำ Primary Owner ออก');
 await expect('Admin C: demote Primary Owner A to editor', 'deny', () => setRole(C, 'co1', A, 'owner', 'editor'));
 await expect('Admin C: demote Primary Owner A to viewer', 'deny', () => setRole(C, 'co1', A, 'owner', 'viewer'));

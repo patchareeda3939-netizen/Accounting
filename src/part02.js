@@ -227,7 +227,11 @@ function sortLocal(coll) {
 function writeError(e) {
   var code = e && e.code;
   if (code === 'quota_exceeded') return 'พื้นที่เก็บข้อมูลเต็ม ลบเอกสารเก่าที่ไม่ใช้ก่อนแล้วลองใหม่';
-  if (code === 'permission-denied') return fbReadOnly() ? 'คุณมีสิทธิ์ดูอย่างเดียวในบริษัทนี้' : 'คุณไม่มีสิทธิ์ทำรายการนี้';
+  if (code === 'permission-denied') {
+    if (fbReadOnly()) return 'คุณมีสิทธิ์ดูอย่างเดียวในบริษัทนี้';
+    var lk = typeof lockDate === 'function' ? lockDate() : '';
+    return lk ? 'บันทึกไม่ได้: รายการอยู่ในงวดบัญชีที่ล็อกแล้ว (ถึง ' + fmtDateNum(lk) + ') หรือคุณไม่มีสิทธิ์ทำรายการนี้ — ต้องให้เจ้าของบริษัทปลดล็อกงวดก่อน' : 'คุณไม่มีสิทธิ์ทำรายการนี้';
+  }
   if (code === 'invalid_argument') return 'คุณไม่มีสิทธิ์แก้ไขข้อมูลในหน้านี้ ขอสิทธิ์ Contributor จากเจ้าของ';
   return 'บันทึกไม่สำเร็จ ลองอีกครั้ง';
 }
@@ -652,7 +656,7 @@ async function saveDoc(btn) {
   if (!party) return fail('กรุณาระบุ' + def.partyLabel);
   var date = byId('f_date').value || todayStr();
   var _lk = (typeof lockDate === 'function') ? lockDate() : '';
-  if (_lk && (date <= _lk || (form.doc && (form.doc.date || '') <= _lk))) return fail('งวดบัญชีถึงวันที่ ' + fmtDateNum(_lk) + ' ถูกล็อกแล้ว ปลดล็อกได้ที่ การบัญชี → ปิดงบรายเดือน');
+  if (_lk && (date <= _lk || (form.doc && (form.doc.date || '') <= _lk))) return fail('งวดบัญชีถึงวันที่ ' + fmtDateNum(_lk) + ' ถูกล็อกแล้ว ' + (canEditLegal() ? 'ปลดล็อกได้ที่ การบัญชี → ปิดงบรายเดือน' : 'ต้องให้เจ้าของบริษัทปลดล็อกก่อน'));
   var extra = {};
   def.extra.forEach(function(f, i) {
     var el = byId('fx_' + i);

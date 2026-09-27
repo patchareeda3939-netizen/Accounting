@@ -5,6 +5,7 @@ rules_version = '2';
 //   companies/{co}/audit/{id}        บันทึกการเปลี่ยนสิทธิ์ ล็อก/ปลดล็อกงวด และลบสาขา (สร้างได้อย่างเดียว แก้/ลบไม่ได้)
 //   companies/{co}/branches/{code}   สาขา { code, name, address, phone, active, used, createdAt }
 //                                    used = มีเอกสารอ้างอิงแล้ว (ตั้งเป็น true ได้ทางเดียว ยกเลิกไม่ได้)
+//   documents / taxReturns ที่ลงวันที่ในงวดที่ล็อกแล้ว (settings/company.lockDate) สร้าง/แก้/ลบไม่ได้ ต้องปลดล็อกก่อน
 //   companies/{co}/{collection}/{id} ข้อมูลบัญชี (documents, contacts, accounts, settings, ...)
 //   ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก (companies/{co} และ settings/company) แก้ได้เฉพาะเจ้าของ
 //   invites/{co}__{email}            คำเชิญที่ยังไม่ตอบรับ
@@ -56,6 +57,43 @@ service cloud.firestore {
       return canEdit(co) && after.get('lockAuditId', '') == id
         && a.fromDate == before && a.toDate == after.get('lockDate', '')
         && (a.action == 'period_lock' ? a.toDate > a.fromDate : (isOwner(co) && a.toDate < a.fromDate));
+    }
+
+    // ---- งวดที่ล็อกแล้ว: ห้ามสร้าง/แก้/ลบ transaction ที่ลงวันที่ในงวดนั้น (ทุกบทบาท รวมถึงเจ้าของ ต้องปลดล็อกก่อน) ----
+    // ใช้ค่า lockDate หลัง batch (ล็อกพร้อมแก้รายการใน batch เดียวกันไม่ได้; ปลดล็อกแล้วค่อยแก้)
+    function lockNow(co) { let s = settingsCompany(co); return existsAfter(s) ? getAfter(s).data.get('lockDate', '') : ''; }
+    function inOpen(d, lock) { return lock == '' || (d is string && d > lock); }
+    // วันที่ที่ใช้ตัดสินงวด: เอกสาร = date, แบบ ภ.พ.30 = วันที่ 1 ของเดือน (period)
+    function txDate(coll, r) { return coll == 'taxReturns' ? r.data.get('period', '') + '-01' : r.data.get('date', ''); }
+    function pDate(p) { return p is map ? p.get('date', '') : ''; }
+    // ทุกรายการชำระในลิสต์ต้องอยู่ในงวดที่เปิด (ตรวจได้สูงสุด 10 รายการต่อการเขียนหนึ่งครั้ง)
+    function allOpen(l, lock) {
+      return lock == '' || (l.size() <= 10
+        && (l.size() < 1 || inOpen(pDate(l[0]), lock)) && (l.size() < 2 || inOpen(pDate(l[1]), lock))
+        && (l.size() < 3 || inOpen(pDate(l[2]), lock)) && (l.size() < 4 || inOpen(pDate(l[3]), lock))
+        && (l.size() < 5 || inOpen(pDate(l[4]), lock)) && (l.size() < 6 || inOpen(pDate(l[5]), lock))
+        && (l.size() < 7 || inOpen(pDate(l[6]), lock)) && (l.size() < 8 || inOpen(pDate(l[7]), lock))
+        && (l.size() < 9 || inOpen(pDate(l[8]), lock)) && (l.size() < 10 || inOpen(pDate(l[9]), lock)));
+    }
+    function pays(r) { let p = r.data.get('payments', []); return p is list ? p : []; }
+    // การชำระที่เพิ่มหรือลบในครั้งนี้ต้องลงวันที่ในงวดที่เปิด; paidDate เดิม/ใหม่ต้องอยู่ในงวดที่เปิด (ถ้าเปลี่ยน)
+    function paymentsOk(lock) {
+      let o = pays(resource); let n = pays(request.resource);
+      let po = resource.data.get('paidDate', null); let pn = request.resource.data.get('paidDate', null);
+      return allOpen(n.removeAll(o), lock) && allOpen(o.removeAll(n), lock)
+        && (po == pn || ((po == null || po == '' || inOpen(po, lock)) && (pn == null || pn == '' || inOpen(pn, lock))));
+    }
+    function periodOk(co, coll) {
+      let lock = lockNow(co);
+      return !(coll in ['documents', 'taxReturns']) || lock == ''
+        || (request.method == 'create' && inOpen(txDate(coll, request.resource), lock) && allOpen(pays(request.resource), lock)
+            && (request.resource.data.get('paidDate', null) == null || request.resource.data.get('paidDate', null) == '' || inOpen(request.resource.data.get('paidDate', null), lock)))
+        || (request.method == 'delete' && inOpen(txDate(coll, resource), lock) && allOpen(pays(resource), lock))
+        || (request.method == 'update' && paymentsOk(lock)
+            && ((inOpen(txDate(coll, resource), lock) && inOpen(txDate(coll, request.resource), lock))
+              // เอกสารในงวดที่ล็อก: แก้ได้เฉพาะการชำระ (ในงวดเปิด) และสถานะการชำระ
+              || (txDate(coll, request.resource) == txDate(coll, resource)
+                && changed().hasOnly(['payments', 'status', 'paidDate', 'updatedAt']))));
     }
 
     // สาขา: ลบได้เมื่อมี audit 'branch_delete' ใน batch เดียวกัน; สาขาที่มีประวัติ (used) ลบได้เฉพาะเจ้าของ
@@ -171,7 +209,8 @@ service cloud.firestore {
         allow write: if !(coll in ['members', 'audit', 'branches']) && canEdit(co)
           && (!touchesLegal(coll, id) || isOwner(co))
           && (!lockChanged(coll, id) || lockWriteOk(co))
-          && (coll != 'documents' || request.method == 'delete' || docBranchOk(co));
+          && (coll != 'documents' || request.method == 'delete' || docBranchOk(co))
+          && periodOk(co, coll);
       }
     }
 
