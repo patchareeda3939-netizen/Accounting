@@ -15,10 +15,7 @@ let APP;
 // serve dist/index.html with a config that points to the emulator
 function startServer() {
   fs.mkdirSync(TMP, { recursive: true });
-  let html = fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8');
-  const cfg = "var FIREBASE_CONFIG = {apiKey:'demo-key',authDomain:'" + PROJECT + ".firebaseapp.com',projectId:'" + PROJECT + "',appId:'demo'};";
-  if (!html.includes('var FIREBASE_CONFIG = null;') || !html.includes('var FIREBASE_EMULATOR_HOST = null;')) throw new Error('dist/index.html: unexpected config (run npm run build)');
-  html = html.replace('var FIREBASE_CONFIG = null;', cfg).replace('var FIREBASE_EMULATOR_HOST = null;', "var FIREBASE_EMULATOR_HOST = '127.0.0.1';");
+  const html = require('./lib').withConfig(fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8'), 'emulator');
   const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html); });
   return new Promise(r => srv.listen(0, '127.0.0.1', () => { APP = 'http://127.0.0.1:' + srv.address().port + '/'; r(srv); }));
 }
