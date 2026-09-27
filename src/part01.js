@@ -160,7 +160,7 @@ function fbRoleBadge() {
 }
 function fbAvatar() {
   var av = document.querySelector('.topbar .avatar'); if (!av) return;
-  av.textContent = (fbEmail()[0] || 'U').toUpperCase(); av.title = fbEmail();
+  av.textContent = (((FB.user && FB.user.displayName) || fbEmail())[0] || 'U').toUpperCase(); av.title = fbEmail();
   av.setAttribute('role', 'button'); av.tabIndex = 0; av.style.cursor = 'pointer';
   av.onclick = fbOpenAccount; av.onkeydown = function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fbOpenAccount(); } };
   // greet the signed-in user by display name, or by email when no name is set
@@ -168,16 +168,31 @@ function fbAvatar() {
 }
 function fbSignOut() { FB.auth.signOut().then(function() { location.reload(); }); }
 function fbRoleText(uid, role) { return uid && uid === fbPrimaryOwner() ? 'เจ้าของหลัก' : (ROLE_LABEL[role] || role || '-'); }
-function fbOpenAccount() {
+function fbOpenAccount(fresh) {
   var u = FB.user;
-  var body = '<div style="line-height:1.9"><div><span class="muted">อีเมล</span> <b>' + esc(fbEmail()) + '</b> ' + (u.emailVerified ? '<span class="status st-paid">ยืนยันแล้ว</span>' : '<span class="status st-overdue">ยังไม่ยืนยัน</span>') + '</div>' +
+  var body = '<div style="line-height:1.9"><div><span class="muted">อีเมล</span> <b>' + esc(fbEmail()) + '</b> ' + (u.emailVerified ? '<span class="status st-paid" id="accVerified">ยืนยันแล้ว</span>' : '<span class="status st-overdue" id="accVerified">ยังไม่ยืนยัน</span>') + '</div>' +
     '<div><span class="muted">บริษัทปัจจุบัน</span> ' + esc(companyName()) + '</div><div><span class="muted">สิทธิ์ของคุณ</span> ' + esc(fbRoleText(u.uid, CUR_ROLE)) + '</div></div>' +
+    '<div class="field" style="margin:12px 0 0"><label for="accName">ชื่อที่แสดง</label><div style="display:flex;gap:8px"><input id="accName" maxlength="60" value="' + esc(u.displayName || '') + '" placeholder="เช่น สมชาย ใจดี" style="flex:1"><button type="button" class="btn btn-outline" id="accNameSave">บันทึกชื่อ</button></div></div>' +
     (u.emailVerified ? '' : '<div class="banner info" style="margin:10px 0 0">ยืนยันอีเมลเพื่อรับคำเชิญเข้าบริษัทอื่น <button type="button" class="linkish" id="accResend">ส่งอีเมลยืนยันอีกครั้ง</button></div>');
   openModal({ title:'บัญชีผู้ใช้', focus:false, body: body, buttons:[
     { label:'ออกจากระบบ', cls:'btn-outline', left:true, onClick: fbSignOut },
     { label:'จัดการผู้ใช้', onClick: function() { fbOpenMembers(); } },
     { label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
   var rs = byId('accResend'); if (rs) rs.onclick = function() { u.sendEmailVerification().then(function() { showToast('ส่งอีเมลยืนยันแล้ว'); }, function(e) { showToast(fbAuthError(e)); }); };
+  byId('accNameSave').onclick = function() {
+    var v = byId('accName').value.trim(), btn = byId('accNameSave'); btn.disabled = true;
+    u.updateProfile({ displayName: v || null }).then(function() { fbAvatar(); btn.disabled = false; showToast(v ? 'บันทึกชื่อแล้ว' : 'ลบชื่อที่แสดงแล้ว'); }, function(e) { btn.disabled = false; showToast(fbAuthError(e)); });
+  };
+  // the verification link is clicked outside the app: refresh the status instead of asking for a new login
+  if (!fresh && !u.emailVerified) u.reload().then(function() {
+    var nu = FB.auth.currentUser; if (!nu || !nu.emailVerified) return;
+    FB.user = nu;
+    return nu.getIdToken(true).then(function() {
+      if (byId('accVerified')) fbOpenAccount(true);
+      showToast('ยืนยันอีเมลแล้ว');
+      return fbAcceptInvites().then(function(joined) { if (joined.length) showToast('เข้าร่วมบริษัท ' + joined.join(', ') + ' แล้ว'); });
+    });
+  }).catch(function() {});
 }
 
 /* ---- Users & roles of the current company ---- */
