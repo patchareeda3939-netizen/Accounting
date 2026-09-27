@@ -163,6 +163,8 @@ function fbAvatar() {
   av.textContent = (fbEmail()[0] || 'U').toUpperCase(); av.title = fbEmail();
   av.setAttribute('role', 'button'); av.tabIndex = 0; av.style.cursor = 'pointer';
   av.onclick = fbOpenAccount; av.onkeydown = function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fbOpenAccount(); } };
+  // greet the signed-in user by display name, or by email when no name is set
+  var gr = byId('homeGreeting'); if (gr) gr.textContent = 'สวัสดี ' + ((FB.user && FB.user.displayName) || fbEmail()) + ' !';
 }
 function fbSignOut() { FB.auth.signOut().then(function() { location.reload(); }); }
 function fbRoleText(uid, role) { return uid && uid === fbPrimaryOwner() ? 'เจ้าของหลัก' : (ROLE_LABEL[role] || role || '-'); }
