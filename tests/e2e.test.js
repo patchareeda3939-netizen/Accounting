@@ -94,6 +94,13 @@ async function verify(email) {
   ok('viewer joined, sees data, badge shown', vs.role === 'viewer' && vs.docs === 1 && vs.badge, vs);
   const vw = await v.evaluate(async () => { try { await addRec('contacts', { name: 'V' }); return 'ok'; } catch (x) { return writeError(x); } });
   ok('viewer write blocked with Thai message', /ดูอย่างเดียว/.test(vw), vw);
+  await v.evaluate(() => go('settings', 'company')); await v.waitForTimeout(800);
+  const vUi = await v.evaluate(() => ({ banner: (byId('coLegalLock') || {}).textContent || '', edit: document.querySelectorAll('[data-coedit]').length, bradd: !!document.querySelector('[data-bradd]'), logo: !!document.querySelector('label.co-logo[for]') }));
+  ok('viewer: company page fully read-only', /ดูอย่างเดียว/.test(vUi.banner) && vUi.edit === 0 && !vUi.bradd && !vUi.logo, vUi);
+  await v.evaluate(() => openCompanySettings());
+  const vDlg = await v.evaluate(() => ({ allDisabled: COMPANY_FIELDS.every(f => !byId('s_' + f.key) || byId('s_' + f.key).disabled), saveHidden: modalFoot.lastElementChild.hidden }));
+  ok('viewer: settings dialog all disabled, no save button', vDlg.allDisabled && vDlg.saveHidden, vDlg);
+  await v.evaluate(() => closeModal());
 
   // ---- stranger
   const s = await page(b);
@@ -134,10 +141,17 @@ async function verify(email) {
   ok('editor can still change non-legal company info (phone)', ePhone === 'ok', ePhone);
   await e.evaluate(() => go('settings', 'company')); await e.waitForTimeout(800);
   const eUi = await e.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
-  ok('editor sees legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'branch', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)) && eUi.edit.includes('phone') && !eUi.bradd, eUi);
+  ok('editor: legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)), eUi);
+  ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'custPhone', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
+  const eBranch = await e.evaluate(async () => { try { await saveSettings('company', { branches: [{ code: '00001', name: 'สาขาทดสอบ', address: 'เชียงใหม่', phone: '' }] }); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor can save branch data', eBranch === 'ok', eBranch);
+  const eVat = await e.evaluate(async () => { try { await saveSettings('company', { vatRegistered: 'no' }); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor cannot change VAT status', eVat === 'permission-denied', eVat);
   await e.evaluate(() => { openCompanySettings(); });
   const eModal = await e.evaluate(() => ({ nameDisabled: byId('s_name').disabled, taxDisabled: byId('s_taxId').disabled, phoneDisabled: byId('s_phone').disabled }));
   ok('editor settings dialog disables legal inputs only', eModal.nameDisabled && eModal.taxDisabled && !eModal.phoneDisabled, eModal);
+  const eSaveDlg = await e.evaluate(async () => { byId('s_phone').value = '02-222-2222'; [...modalFoot.querySelectorAll('button')].pop().click(); await new Promise(r => setTimeout(r, 1500)); return { open: !byId('overlay').classList.contains('hidden') && !!byId('s_phone'), phone: companySettings().phone, tax: companySettings().taxId }; });
+  ok('editor saving the dialog updates phone and leaves legal fields', eSaveDlg.phone === '02-222-2222', eSaveDlg);
   await e.evaluate(() => closeModal());
   await o.evaluate(() => go('settings', 'company')); await o.waitForTimeout(800);
   const oUi = await o.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));

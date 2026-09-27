@@ -4,9 +4,10 @@ var FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู', removed:'ถูกนำออก', none:'-' };
 function fbConfigured() { return typeof FIREBASE_CONFIG !== 'undefined' && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey); }
 function fbReadOnly() { return FB_MODE && CUR_ROLE === 'viewer'; }
-// ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก: แก้ได้เฉพาะเจ้าของ (บังคับซ้ำใน firestore.rules)
-var LEGAL_FIELDS = ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
+// ข้อมูลนิติบุคคลหลัก: แก้ได้เฉพาะเจ้าของ; ข้อมูลใช้งานประจำวัน: เจ้าของและผู้แก้ไข; ผู้ดูอ่านอย่างเดียว (บังคับซ้ำใน firestore.rules)
+var LEGAL_FIELDS = ['name', 'legalName', 'taxId', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
 function canEditLegal() { return !FB_MODE || CUR_ROLE === 'owner'; }
+function canEditCompanyInfo() { return !FB_MODE || CUR_ROLE === 'owner' || CUR_ROLE === 'editor'; }
 function fbEmail() { return FB && FB.user ? String(FB.user.email || '').toLowerCase() : ''; }
 
 /* ---- Firestore stores nested arrays, undefined and '' keys poorly: encode on write, decode on read ---- */

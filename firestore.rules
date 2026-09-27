@@ -26,7 +26,8 @@ service cloud.firestore {
     function primaryOwner(co) { return get(coPath(co)).data.ownerId; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     // ข้อมูลนิติบุคคลหลักใน settings/company: แก้ได้เฉพาะเจ้าของ (Owner/Admin)
-    function legalFields() { return ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart']; }
+    // ฟิลด์อื่น (ที่อยู่บนเอกสาร โทร อีเมล โลโก้ ข้อมูลติดต่อ ค่าเริ่มต้น สาขา) ผู้แก้ไขแก้ได้
+    function legalFields() { return ['name', 'legalName', 'taxId', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart']; }
     function touchesLegal(coll, id) {
       return coll == 'settings' && id == 'company'
         && (request.method == 'delete' || request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasAny(legalFields()));

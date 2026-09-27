@@ -173,26 +173,34 @@ await expect('Admin C: remove a member (T)', 'allow', () => remove(C, 'co1', T, 
 await mkCompany(A, 'co9', 'Throwaway');
 await expect('Primary Owner A: delete own company (co9)', 'allow', () => deleteDoc(doc(A.db, 'companies', 'co9')));
 
-S('R12', 'ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก: เฉพาะ Owner/Admin');
-const legal = ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
-const legalVal = (f, r) => f === 'branches' ? [{ code: '00001', name: r, address: 'x' }] : f + ' ' + r;
+S('R12', 'Field matrix ข้อมูลบริษัท: นิติบุคคลหลัก = Owner/Admin, ข้อมูลใช้งานประจำวัน = Owner/Admin/User, Viewer อ่านอย่างเดียว');
+// ข้อมูลนิติบุคคลหลัก (settings/company) — Owner/Admin เท่านั้น
+const legal = ['name', 'legalName', 'taxId', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
+// ข้อมูลใช้งานประจำวัน — Owner/Admin/User
+const daily = ['address', 'phone', 'email', 'website', 'industry', 'logo', 'custEmail', 'custPhone', 'custAddress', 'defaultReportPeriod', 'branch', 'branches'];
+const fieldVal = (f, r) => f === 'branches' ? [{ code: '0000' + (r.length % 9 + 1), name: r, address: 'addr ' + r, phone: '02' }] : f + ' ' + r;
 const rs = () => doc(A.db, 'companies/co1/settings/company');
+const baseline = { name: 'Company A', legalName: 'Company A', taxId: '0105550000007', vatRegistered: 'yes', businessType: 'บริษัทจำกัด' };
+await setDoc(rs(), baseline, { merge: true });
 for (const [r, u] of roles) {
-  const want = O(r);
-  await expect(`${r}: change company name (companies doc)`, want, () => updateDoc(doc(u.db, 'companies', 'co1'), { name: 'Co1 ' + r }));
-  await expect(`${r}: change tax ID (companies doc)`, want, () => updateDoc(doc(u.db, 'companies', 'co1'), { taxId: '010555000000' + (r.length % 10) }));
-  for (const f of legal) await expect(`${r}: change settings.${f}`, want, () => setDoc(doc(u.db, 'companies/co1/settings/company'), { [f]: legalVal(f, r) }, { merge: true }));
-  await expect(`${r}: overwrite settings/company keeping legal fields`, ['Viewer V'].includes(r) ? 'deny' : 'allow', async () => { const cur = (await getDoc(rs())).data(); await setDoc(doc(u.db, 'companies/co1/settings/company'), { ...cur, phone: '02-' + r.length }); });
-  await expect(`${r}: overwrite settings/company dropping legal fields`, want, async () => { await setDoc(doc(u.db, 'companies/co1/settings/company'), { phone: '02-000' }); await setDoc(rs(), { name: 'Company A', legalName: 'Company A', taxId: '0105550000007' }); });
-  await expect(`${r}: delete settings/company`, want, async () => { await deleteDoc(doc(u.db, 'companies/co1/settings/company')); await setDoc(rs(), { name: 'Company A', legalName: 'Company A', taxId: '0105550000007' }); });
-  await expect(`${r}: change non-legal settings (phone, logo, report period)`, W(r), () => setDoc(doc(u.db, 'companies/co1/settings/company'), { phone: 'p-' + r.length, logo: '', defaultReportPeriod: 'month' }, { merge: true }));
+  await expect(`${r}: change company name (companies doc)`, O(r), () => updateDoc(doc(u.db, 'companies', 'co1'), { name: 'Co1 ' + r }));
+  await expect(`${r}: change tax ID (companies doc)`, O(r), () => updateDoc(doc(u.db, 'companies', 'co1'), { taxId: '010555000000' + (r.length % 10) }));
+  for (const f of legal) await expect(`${r}: legal field settings.${f}`, O(r), () => setDoc(doc(u.db, 'companies/co1/settings/company'), { [f]: fieldVal(f, r) }, { merge: true }));
+  for (const f of daily) await expect(`${r}: daily field settings.${f}`, W(r), () => setDoc(doc(u.db, 'companies/co1/settings/company'), { [f]: fieldVal(f, r) }, { merge: true }));
+  await expect(`${r}: overwrite settings/company keeping legal fields`, W(r), async () => { const cur = (await getDoc(rs())).data(); await setDoc(doc(u.db, 'companies/co1/settings/company'), { ...cur, phone: '02-' + r.length }); });
+  await expect(`${r}: overwrite settings/company dropping legal fields`, O(r), async () => { await setDoc(doc(u.db, 'companies/co1/settings/company'), { phone: '02-000' }); await setDoc(rs(), baseline); });
+  await expect(`${r}: delete settings/company`, O(r), async () => { await deleteDoc(doc(u.db, 'companies/co1/settings/company')); await setDoc(rs(), baseline); });
+  await expect(`${r}: legal + daily field in one write`, O(r), () => setDoc(doc(u.db, 'companies/co1/settings/company'), { phone: 'x', taxId: '0105550000015' }, { merge: true }));
+  await setDoc(rs(), baseline, { merge: true });
+  await expect(`${r}: form styles (document defaults)`, W(r), () => setDoc(doc(u.db, 'companies/co1/formStyles/fs-' + r.length), { name: 'style ' + r }));
 }
 await deleteDoc(rs());
-await expect('User E: create settings/company containing legal fields', 'deny', () => setDoc(doc(E.db, 'companies/co1/settings/company'), { name: 'x', phone: '1' }));
-await expect('User E: create settings/company without legal fields', 'allow', () => setDoc(doc(E.db, 'companies/co1/settings/company'), { phone: '1' }));
-await expect('Admin C: restore legal fields', 'allow', () => setDoc(doc(C.db, 'companies/co1/settings/company'), { name: 'Company A', legalName: 'Company A', taxId: '0105550000007' }, { merge: true }));
-await expect('legal fields unchanged by User/Viewer attempts', 'allow', async () => { const d = (await getDoc(rs())).data(); if (d.name !== 'Company A' || d.taxId !== '0105550000007') throw new Error(JSON.stringify(d)); });
-await expect('User E: write other settings documents', 'allow', () => setDoc(doc(E.db, 'companies/co1/settings/close_2026-09'), { done: { a: true } }));
+await expect('User E: create settings/company containing a legal field', 'deny', () => setDoc(doc(E.db, 'companies/co1/settings/company'), { taxId: '0105550000007', phone: '1' }));
+await expect('User E: create settings/company with daily fields only', 'allow', () => setDoc(doc(E.db, 'companies/co1/settings/company'), { phone: '1', branches: [] }));
+await expect('Admin C: restore legal fields', 'allow', () => setDoc(doc(C.db, 'companies/co1/settings/company'), baseline, { merge: true }));
+await expect('legal fields unchanged by User/Viewer attempts', 'allow', async () => { const d = (await getDoc(rs())).data(); for (const k of Object.keys(baseline)) if (d[k] !== baseline[k]) throw new Error(k + '=' + d[k]); });
+await expect('User E: write other settings documents (month-end close)', 'allow', () => setDoc(doc(E.db, 'companies/co1/settings/close_2026-09'), { done: { a: true } }));
+await expect('Viewer V: write other settings documents', 'deny', () => setDoc(doc(V.db, 'companies/co1/settings/close_2026-09'), { done: { a: false } }));
 
 S('R5', 'Co-owner (Admin) ห้ามลดสิทธิ์หรือนำ Primary Owner ออก');
 await expect('Admin C: demote Primary Owner A to editor', 'deny', () => setRole(C, 'co1', A, 'owner', 'editor'));
