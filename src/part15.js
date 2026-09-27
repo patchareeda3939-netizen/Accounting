@@ -58,7 +58,7 @@ function openNewCompany() {
 // keep company registry name in sync with settings
 var _coSyncT = null;
 function syncCompanyRegistry() {
-  if (!db) return;
+  if (!db || !canEditLegal()) return;
   clearTimeout(_coSyncT);
   _coSyncT = setTimeout(function() {
     var cs = companySettings(), cur = COMPANIES.find(function(c) { return c._id === CUR_CO; }), name = companyName();
@@ -66,44 +66,107 @@ function syncCompanyRegistry() {
   }, 800);
 }
 
-/* ---- Branches ---- */
-function branches() { var b = companySettings().branches; return Array.isArray(b) ? b : []; }
+/* ---- Branches: companies/{co}/branches/{code} ----
+   used = มีเอกสารอ้างอิงแล้ว → แก้รหัสไม่ได้ ผู้แก้ไขลบไม่ได้ (ใช้ "ปิดใช้งาน" แทน) เจ้าของลบได้พร้อม audit */
+function allBranches() { return STORE.branches.slice().sort(function(a, b) { return String(a.code).localeCompare(String(b.code)); }); }
+function branches() { return allBranches().filter(function(b) { return b.active !== false; }); }
+// branches offered on a document form: active ones plus the document's current branch
+function branchesFor(cur) { return allBranches().filter(function(b) { return b.active !== false || b.code === cur; }); }
+function branchUsedByDocs(code) { return STORE.documents.some(function(d) { return d.extra && d.extra.branch === code; }); }
 function branchOf(code) {
   var cs = companySettings();
   if (!code || code === '00000') return { code:'00000', name: cs.branch || 'สำนักงานใหญ่', address: cs.legalAddress || cs.address || '', phone: cs.phone || '' };
-  return branches().find(function(b) { return b.code === code; }) || branchOf('');
+  return allBranches().find(function(b) { return b.code === code; }) || branchOf('');
 }
 function branchLabel(b) { return b.code === '00000' ? (b.name || 'สำนักงานใหญ่') : 'สาขาที่ ' + b.code + (b.name ? ' ' + b.name : ''); }
 function branchesSectionHTML() {
-  var hq = branchOf('');
+  var hq = branchOf(''), edit = canEditCompanyInfo(), owner = canEditLegal();
   return '<section class="co-card"><div class="co-head"><h2>สาขา</h2><p>สาขาและที่อยู่สาขา ใช้ในหัวเอกสาร ใบกำกับภาษี และหนังสือรับรอง 50 ทวิ</p></div>' +
-    '<div class="items-wrap"><table class="data-table"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th></th></tr></thead><tbody>' +
-    '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
-    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap"><button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button></td></tr>'; }).join('') +
-    '</tbody></table></div><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div></section>';
+    '<div class="items-wrap"><table class="data-table" id="brTable"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th>สถานะ</th><th></th></tr></thead><tbody>' +
+    '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small">ใช้งาน</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
+    allBranches().map(function(b) {
+      var c = esc(b.code), off = b.active === false, acts = [];
+      if (edit) {
+        acts.push('<button type="button" class="linkish" data-bredit="' + c + '">แก้ไข</button>');
+        acts.push('<button type="button" class="linkish" data-bractive="' + c + '">' + (off ? 'เปิดใช้งาน' : 'ปิดใช้งาน') + '</button>');
+        if (!b.used || owner) acts.push('<button type="button" class="linkish" data-brdel="' + c + '">ลบ</button>');
+      }
+      return '<tr data-brrow="' + c + '"' + (off ? ' class="muted"' : '') + '><td class="num">' + c + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td>' +
+        '<td class="small">' + (off ? 'ปิดใช้งาน' : 'ใช้งาน') + (b.used ? ' · <span title="มีเอกสารอ้างอิงแล้ว">มีประวัติ</span>' : '') + '</td><td style="white-space:nowrap">' + acts.join(' · ') + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>' + (edit ? '<p class="small muted" style="margin:6px 0 0">สาขาที่มีประวัติ (มีเอกสารอ้างอิงแล้ว) แก้รหัสไม่ได้ และลบได้เฉพาะเจ้าของบริษัท ให้ใช้ "ปิดใช้งาน" แทนการลบ</p><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div>' : '') + '</section>';
 }
-function openBranchForm(i) {
-  var list = branches().slice(), b = i != null ? list[i] : null;
+// create or replace a branch record (doc id = branch code in every storage mode)
+async function putBranch(rec) {
+  if (db) { await setRec('branches', rec.code, rec); return; }
+  var i = STORE.branches.findIndex(function(x) { return x._id === rec.code; }), r = Object.assign({}, rec, { _id: rec.code });
+  if (i >= 0) STORE.branches[i] = r; else STORE.branches.push(r);
+  sortLocal('branches'); onData();
+}
+async function deleteBranch(b) {
+  if (FB_MODE) return fbDeleteBranch(b);
+  await delRec('branches', b._id);
+}
+function openBranchForm(code) {
+  var list = allBranches(), b = code ? list.find(function(x) { return x.code === code; }) : null;
   var next = String(list.reduce(function(m, x) { return Math.max(m, Number(x.code) || 0); }, 0) + 1).padStart(5, '0');
-  var body = '<div class="grid-2"><div class="field"><label for="brCode">รหัสสาขา (5 หลัก) <b class="neg-text">*</b></label><input id="brCode" maxlength="5" inputmode="numeric" value="' + esc(b ? b.code : next) + '"></div>' +
+  var lockCode = !!(b && b.used);
+  var body = '<div class="grid-2"><div class="field"><label for="brCode">รหัสสาขา (5 หลัก) <b class="neg-text">*</b></label><input id="brCode" maxlength="5" inputmode="numeric" value="' + esc(b ? b.code : next) + '"' + (lockCode ? ' disabled title="สาขานี้มีเอกสารอ้างอิงแล้ว แก้รหัสไม่ได้"' : '') + '></div>' +
     '<div class="field"><label for="brName">ชื่อสาขา</label><input id="brName" value="' + esc(b ? b.name : '') + '" placeholder="เช่น สาขาเชียงใหม่"></div></div>' +
     '<div class="field"><label for="brAddr">ที่อยู่สาขา <b class="neg-text">*</b></label><textarea id="brAddr" rows="3">' + esc(b ? b.address : '') + '</textarea></div>' +
-    '<div class="field"><label for="brPhone">โทรศัพท์</label><input id="brPhone" value="' + esc(b ? b.phone || '' : '') + '"></div><div class="form-error" id="formError" hidden></div>';
+    '<div class="field"><label for="brPhone">โทรศัพท์</label><input id="brPhone" value="' + esc(b ? b.phone || '' : '') + '"></div>' +
+    (lockCode ? '<p class="small muted" style="margin:0">สาขานี้มีเอกสารอ้างอิงแล้ว จึงแก้รหัสสาขาไม่ได้ ถ้าต้องการรหัสใหม่ ให้ปิดใช้งานสาขานี้แล้วเพิ่มสาขาใหม่</p>' : '') + '<div class="form-error" id="formError" hidden></div>';
   openModal({ title: b ? 'แก้ไขสาขา' : 'เพิ่มสาขา', body: body, buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: async function(btn) {
-    var err = byId('formError'), code = byId('brCode').value.trim(), addr = byId('brAddr').value.trim();
-    if (!/^\d{5}$/.test(code) || code === '00000') { err.textContent = 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00001 ขึ้นไป)'; err.hidden = false; return; }
-    if (list.some(function(x, k) { return x.code === code && k !== i; })) { err.textContent = 'รหัสสาขาซ้ำ'; err.hidden = false; return; }
+    var err = byId('formError'), nc = byId('brCode').value.trim(), addr = byId('brAddr').value.trim();
+    if (!/^\d{5}$/.test(nc) || nc === '00000') { err.textContent = 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00001 ขึ้นไป)'; err.hidden = false; return; }
+    if (list.some(function(x) { return x.code === nc && x !== b; })) { err.textContent = 'รหัสสาขาซ้ำ'; err.hidden = false; return; }
     if (!addr) { err.textContent = 'กรุณาระบุที่อยู่สาขา'; err.hidden = false; return; }
-    var rec = { code: code, name: byId('brName').value.trim(), address: addr, phone: byId('brPhone').value.trim() };
-    if (b) list[i] = rec; else list.push(rec);
-    list.sort(function(x, y) { return x.code.localeCompare(y.code); });
-    btn.disabled = true; await saveSettings('company', { branches: list }); closeModal(); showToast('บันทึกสาขาแล้ว');
+    var rec = { code: nc, name: byId('brName').value.trim(), address: addr, phone: byId('brPhone').value.trim(), active: b ? b.active !== false : true, used: b && b.code === nc ? !!b.used : branchUsedByDocs(nc), createdAt: b && b.code === nc ? b.createdAt : Date.now() };
+    btn.disabled = true;
+    try {
+      await putBranch(rec);
+      if (b && b.code !== nc) await deleteBranch(b); // code changed on a branch without history
+      closeModal(); showToast('บันทึกสาขาแล้ว');
+    } catch (e) { btn.disabled = false; err.textContent = writeError(e); err.hidden = false; }
   } }] });
 }
 function bindBranches(c) {
+  var find = function(code) { return allBranches().find(function(x) { return x.code === code; }); };
   c.querySelectorAll('[data-bradd]').forEach(function(b) { b.onclick = function() { openBranchForm(null); }; });
-  c.querySelectorAll('[data-bredit]').forEach(function(b) { b.onclick = function() { openBranchForm(Number(b.dataset.bredit)); }; });
-  c.querySelectorAll('[data-brdel]').forEach(function(b) { b.onclick = async function() { var list = branches().slice(); list.splice(Number(b.dataset.brdel), 1); await saveSettings('company', { branches: list }); showToast('ลบสาขาแล้ว'); }; });
+  c.querySelectorAll('[data-bredit]').forEach(function(b) { b.onclick = function() { openBranchForm(b.dataset.bredit); }; });
+  c.querySelectorAll('[data-bractive]').forEach(function(b) { b.onclick = async function() {
+    var br = find(b.dataset.bractive);
+    try { await putBranch(Object.assign(strip(br), { active: br.active === false })); showToast(br.active === false ? 'เปิดใช้งานสาขาแล้ว' : 'ปิดใช้งานสาขาแล้ว'); } catch (e) { showToast(writeError(e)); }
+  }; });
+  c.querySelectorAll('[data-brdel]').forEach(function(b) { b.onclick = async function() {
+    var br = find(b.dataset.brdel);
+    if (!confirm(br.used ? 'สาขา ' + br.code + ' มีเอกสารอ้างอิงแล้ว การลบจะถูกบันทึกในประวัติ เอกสารเดิมยังแสดงรหัสสาขานี้ ยืนยันลบ?' : 'ลบสาขา ' + br.code + '?')) return;
+    try { await deleteBranch(br); showToast('ลบสาขาแล้ว'); } catch (e) { showToast(writeError(e)); }
+  }; });
+}
+// a document that refers to a branch marks the branch as used first (enforced by firestore.rules)
+async function markBranchUsed(rec) {
+  var code = rec && rec.extra && rec.extra.branch;
+  if (!code || code === '00000') return;
+  var b = STORE.branches.find(function(x) { return x.code === code; });
+  if (b && !b.used) await putBranch(Object.assign(strip(b), { used: true }));
+}
+// one-time move from the old settings.branches list to branch records
+var _brMigrating = false;
+function migrateLegacyBranches() {
+  var legacy = companySettings().branches;
+  if (_brMigrating || !Array.isArray(legacy) || !canEditCompanyInfo() || !collectionsLoaded()) return;
+  _brMigrating = true;
+  (async function() {
+    try {
+      for (var i = 0; i < legacy.length; i++) {
+        var x = legacy[i] || {};
+        if (!/^\d{5}$/.test(x.code || '') || x.code === '00000' || STORE.branches.some(function(b) { return b.code === x.code; })) continue;
+        await putBranch({ code: x.code, name: x.name || '', address: x.address || '', phone: x.phone || '', active: true, used: branchUsedByDocs(x.code), createdAt: Date.now() + i });
+      }
+      await saveSettings('company', { branches: null });
+    } catch (e) {} finally { _brMigrating = false; }
+  })();
 }
 // company-info view for a document (uses the document's branch)
 function coInfoFor(d) {

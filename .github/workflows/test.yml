@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Firestore Emulator ต้องใช้ Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('package-lock.json') }}
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: dist/ และ index.html ต้องตรงกับ src/ (ลืมรัน ./build.sh หรือไม่)
+        run: npm run check:dist
+
+      - name: Smoke test (โหมดเบราว์เซอร์ / Claude DB)
+        run: npm run test:smoke
+
+      - name: Firestore rules + regression + end-to-end (Firebase Emulator)
+        run: npm run test:firebase

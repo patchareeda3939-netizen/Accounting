@@ -720,6 +720,10 @@ var FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู', removed:'ถูกนำออก', none:'-' };
 function fbConfigured() { return typeof FIREBASE_CONFIG !== 'undefined' && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey); }
 function fbReadOnly() { return FB_MODE && CUR_ROLE === 'viewer'; }
+// ข้อมูลนิติบุคคลหลัก: แก้ได้เฉพาะเจ้าของ; ข้อมูลใช้งานประจำวัน: เจ้าของและผู้แก้ไข; ผู้ดูอ่านอย่างเดียว (บังคับซ้ำใน firestore.rules)
+var LEGAL_FIELDS = ['name', 'legalName', 'taxId', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
+function canEditLegal() { return !FB_MODE || CUR_ROLE === 'owner'; }
+function canEditCompanyInfo() { return !FB_MODE || CUR_ROLE === 'owner' || CUR_ROLE === 'editor'; }
 function fbEmail() { return FB && FB.user ? String(FB.user.email || '').toLowerCase() : ''; }
 
 /* ---- Firestore stores nested arrays, undefined and '' keys poorly: encode on write, decode on read ---- */
@@ -860,7 +864,9 @@ function fbWatchRole() {
   _fbRoleUnsub = FB.fs.doc('companies/' + co + '/members/' + FB.user.uid).onSnapshot(function(s) {
     if (co !== CUR_CO) return;
     if (!s.exists || s.data().role === 'removed') return removed();
+    var changed = CUR_ROLE !== s.data().role;
     CUR_ROLE = s.data().role; fbRoleBadge();
+    if (changed && byId('sectionView') && !byId('sectionView').hidden) refreshPageData(); // edit controls depend on the role
   }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
 function fbRoleBadge() {
@@ -889,7 +895,22 @@ function fbOpenAccount() {
 }
 
 /* ---- Users & roles of the current company ---- */
-var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก' };
+var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก', period_lock:'ล็อกงวดบัญชี', period_unlock:'ปลดล็อกงวดบัญชี', branch_delete:'ลบสาขา' };
+function fbSaveSettings(id, patch) { var v = fbEncode(patch); return FB.fs.doc('companies/' + CUR_CO + '/settings/' + id).set(v, { mergeFields: Object.keys(v) }); }
+// period lock: settings/company.lockDate + audit entry in one batch
+async function fbSetLockDate(to, action) {
+  var fs = FB.fs, co = CUR_CO, b = fs.batch(), ref = fs.collection('companies/' + co + '/audit').doc();
+  b.set(ref, { action: action, actorUid: FB.user.uid, actorEmail: fbEmail(), fromDate: lockDate(), toDate: to, at: firebase.firestore.FieldValue.serverTimestamp() });
+  b.set(fs.doc('companies/' + co + '/settings/company'), { lockDate: to, lockAuditId: ref.id, updatedAt: Date.now() }, { merge: true });
+  await b.commit();
+}
+// branch delete: audit id is derived from the branch so the rules can require it
+async function fbDeleteBranch(br) {
+  var fs = FB.fs, co = CUR_CO, b = fs.batch();
+  b.set(fs.doc('companies/' + co + '/audit/bdel_' + br.code + '_' + br.createdAt), { action: 'branch_delete', actorUid: FB.user.uid, actorEmail: fbEmail(), branchCode: br.code, branchUsed: !!br.used, at: firebase.firestore.FieldValue.serverTimestamp() });
+  b.delete(fs.doc('companies/' + co + '/branches/' + br.code));
+  await b.commit();
+}
 function fbOpenMembers() {
   openModal({ title:'จัดการผู้ใช้', focus:false, body:'<div id="mbBody" class="muted">กำลังโหลด…</div>', buttons:[{ label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
   fbRenderMembers();
@@ -924,8 +945,13 @@ async function fbRenderMembers() {
       '<div class="toolbar"><button type="button" class="btn btn-dark" id="mbInvite">เชิญ</button></div><div class="form-error" id="formError" hidden></div>' +
       '<p class="small muted" style="margin:6px 0 0">ระบบไม่ได้ส่งอีเมลเชิญให้ แจ้งผู้ใช้ให้สมัครสมาชิกด้วยอีเมลนี้และกดยืนยันอีเมล แล้วบริษัทนี้จะปรากฏให้อัตโนมัติเมื่อเข้าสู่ระบบ</p>' +
       (inv.length ? '<h3 style="margin:18px 0 8px;font-size:15px">คำเชิญที่รอตอบรับ</h3><div class="items-wrap"><table class="data-table"><tbody>' + inv.map(function(x) { return '<tr><td>' + esc(x.email) + '</td><td>' + esc(ROLE_LABEL[x.role] || x.role) + '</td><td><button type="button" class="linkish" data-mbrevoke="' + esc(x.id) + '">ยกเลิกคำเชิญ</button></td></tr>'; }).join('') + '</tbody></table></div>' : '') +
-      '<h3 style="margin:18px 0 8px;font-size:15px">ประวัติการเปลี่ยนสิทธิ์</h3>' + (log.length ? '<div class="items-wrap"><table class="data-table" id="mbAudit"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>รายการ</th><th>ผู้ใช้</th><th>สิทธิ์</th></tr></thead><tbody>' +
-        log.map(function(a) { return '<tr><td class="small">' + esc(fmtAt(a.at)) + '</td><td>' + esc(a.actorEmail) + '</td><td>' + esc(AUDIT_LABEL[a.action] || a.action) + '</td><td>' + esc(a.targetEmail) + '</td><td class="small">' + esc((ROLE_LABEL[a.fromRole] || a.fromRole) + ' → ' + (ROLE_LABEL[a.toRole] || a.toRole)) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">ยังไม่มีรายการ</p>')
+      '<h3 style="margin:18px 0 8px;font-size:15px">ประวัติการเปลี่ยนสิทธิ์ ล็อกงวด และลบสาขา</h3>' + (log.length ? '<div class="items-wrap"><table class="data-table" id="mbAudit"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>รายการ</th><th>ผู้ใช้ / งวด / สาขา</th><th>รายละเอียด</th></tr></thead><tbody>' +
+        log.map(function(a) {
+          var period = a.action === 'period_lock' || a.action === 'period_unlock', br = a.action === 'branch_delete';
+          var who = period ? 'งวดบัญชี' : br ? 'สาขา ' + a.branchCode : a.targetEmail;
+          var what = period ? (a.fromDate ? fmtDateNum(a.fromDate) : 'ไม่ล็อก') + ' → ' + (a.toDate ? 'ล็อกถึง ' + fmtDateNum(a.toDate) : 'ไม่ล็อก') : br ? (a.branchUsed ? 'มีประวัติ' : 'ไม่มีประวัติ') : (ROLE_LABEL[a.fromRole] || a.fromRole) + ' → ' + (ROLE_LABEL[a.toRole] || a.toRole);
+          return '<tr><td class="small">' + esc(fmtAt(a.at)) + '</td><td>' + esc(a.actorEmail) + '</td><td>' + esc(AUDIT_LABEL[a.action] || a.action) + '</td><td>' + esc(who) + '</td><td class="small">' + esc(what) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">ยังไม่มีรายการ</p>')
       : '<p class="small muted" style="margin:10px 0 0">เฉพาะเจ้าของบริษัทเท่านั้นที่เชิญหรือเปลี่ยนสิทธิ์ผู้ใช้ได้</p>');
   var fail = function(e) { showToast(writeError(e)); fbRenderMembers(); };
   var find = function(uid) { return ms.find(function(x) { return x.uid === uid; }); };
@@ -1228,13 +1254,13 @@ function statusPill(d) { var s = docStatus(d); return '<span class="status st-' 
 /* ================= Data store ================= */
 var db = null;
 var dbReady = false;
-var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] };
+var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] };
 var localSeq = 0;
 
 var CUR_CO = 'main', COMPANIES = [], _unsubs = [], LOCAL_CO = {};
 try { CUR_CO = localStorage.getItem('psm_company') || 'main'; } catch (e) {}
 function cname(coll) { return CUR_CO === 'main' ? coll : coll + '__' + CUR_CO; }
-var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc']];
+var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc'],['branches','code','asc']];
 async function initDb() {
   try { db = (window.claude && window.claude.use) ? await window.claude.use('db') : null; } catch (e) { db = null; }
   if (!db && fbConfigured()) db = await fbStart();
@@ -1245,8 +1271,10 @@ async function initDb() {
   subscribeAll();
   if (FB_MODE) fbAfterStart();
 }
+var _loaded = {};
+function collectionsLoaded() { return !db || SUBS.every(function(s) { return _loaded[s[0]]; }); }
 function subscribeAll() {
-  _unsubs.forEach(function(u) { try { u && u(); } catch (e) {} }); _unsubs = [];
+  _unsubs.forEach(function(u) { try { u && u(); } catch (e) {} }); _unsubs = []; _loaded = {};
   SUBS.forEach(function(s) { subscribe(s[0], s[1], s[2]); });
 }
 function subscribe(coll, field, dir) {
@@ -1255,6 +1283,7 @@ function subscribe(coll, field, dir) {
     var u = db.collection(cname(coll)).orderBy(field, dir).limit(1000).onSnapshot(function(snap) {
       if (co !== CUR_CO) return;
       STORE[coll] = snap.docs.map(function(d) { var o = Object.assign({}, d.data()); o._id = d.id; return o; });
+      _loaded[coll] = true;
       onData();
     }, function(err) { showToast('โหลดข้อมูล ' + coll + ' ไม่สำเร็จ'); });
     _unsubs.push(u);
@@ -1262,7 +1291,7 @@ function subscribe(coll, field, dir) {
 }
 function switchCompany(id) {
   if (id === CUR_CO) return;
-  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] }; }
+  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] }; }
   else SUBS.forEach(function(s) { STORE[s[0]] = []; });
   CUR_CO = id; try { localStorage.setItem('psm_company', id); } catch (e) {}
   if (!db && !LOCAL_CO[id]) localLoad();
@@ -1273,23 +1302,29 @@ function switchCompany(id) {
 }
 function strip(rec) { var o = Object.assign({}, rec); delete o._id; return o; }
 function sortLocal(coll) {
-  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1] }[coll];
+  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1], branches:['code',1] }[coll];
   STORE[coll].sort(function(a, b) { var x = a[f[0]], y = b[f[0]]; return (x > y ? 1 : x < y ? -1 : 0) * f[1]; });
 }
 function writeError(e) {
   var code = e && e.code;
   if (code === 'quota_exceeded') return 'พื้นที่เก็บข้อมูลเต็ม ลบเอกสารเก่าที่ไม่ใช้ก่อนแล้วลองใหม่';
-  if (code === 'permission-denied') return fbReadOnly() ? 'คุณมีสิทธิ์ดูอย่างเดียวในบริษัทนี้' : 'คุณไม่มีสิทธิ์ทำรายการนี้';
+  if (code === 'permission-denied') {
+    if (fbReadOnly()) return 'คุณมีสิทธิ์ดูอย่างเดียวในบริษัทนี้';
+    var lk = typeof lockDate === 'function' ? lockDate() : '';
+    return lk ? 'บันทึกไม่ได้: รายการอยู่ในงวดบัญชีที่ล็อกแล้ว (ถึง ' + fmtDateNum(lk) + ') หรือคุณไม่มีสิทธิ์ทำรายการนี้ — ต้องให้เจ้าของบริษัทปลดล็อกงวดก่อน' : 'คุณไม่มีสิทธิ์ทำรายการนี้';
+  }
   if (code === 'invalid_argument') return 'คุณไม่มีสิทธิ์แก้ไขข้อมูลในหน้านี้ ขอสิทธิ์ Contributor จากเจ้าของ';
   return 'บันทึกไม่สำเร็จ ลองอีกครั้ง';
 }
 async function addRec(coll, rec) {
+  if (coll === 'documents') await markBranchUsed(rec);
   if (db) { var ref = await db.collection(cname(coll)).add(rec); return ref && ref.id; }
   rec = Object.assign({}, rec, { _id: 'local' + (++localSeq) });
   STORE[coll].push(rec); sortLocal(coll); onData();
   return rec._id;
 }
 async function setRec(coll, id, rec) {
+  if (coll === 'documents') await markBranchUsed(rec);
   if (db) { await db.doc(cname(coll) + '/' + id).set(strip(rec)); return; }
   var i = STORE[coll].findIndex(function(r) { return r._id === id; });
   if (i >= 0) STORE[coll][i] = Object.assign({}, strip(rec), { _id:id });
@@ -1336,6 +1371,7 @@ function onData() {
   renderDatalists();
   renderDashboard();
   if (!byId('sectionView').hidden) refreshPageData();
+  if (dbReady) migrateLegacyBranches();
 }
 
 /* ================= Datalists ================= */
@@ -1507,7 +1543,7 @@ function openDocForm(typeKey, doc, prefill) {
   if (def.group === 'customer' || def.group === 'supplier') html += '<div class="field"><label for="f_note">หมายเหตุ (แสดงในแบบฟอร์ม)</label><input id="f_note" type="text" value="' + esc(ex.note || '') + '"></div>';
   form.attachments = ((ex.attachments) || []).slice();
   if (def.group === 'customer' || def.group === 'supplier' || def.group === 'other') html += dimSelectsHTML(ex);
-  if (branches().length && (def.group === 'customer' || def.group === 'supplier')) html += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branches()).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
+  if (branchesFor(ex.branch).length && (def.group === 'customer' || def.group === 'supplier')) html += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branchesFor(ex.branch)).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
   html += '<div class="field"><label>ไฟล์แนบ</label><div id="attList" class="att-list"></div><label class="btn btn-outline att-add">📎 แนบไฟล์<input type="file" id="attInput" multiple hidden accept="image/*,application/pdf,.csv,.txt,.json,.md"></label><div class="small muted" id="attMsg">รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB ต่อไฟล์</div></div>';
 
   if (def.template === 'itemized') {
@@ -1701,7 +1737,7 @@ async function saveDoc(btn) {
   if (!party) return fail('กรุณาระบุ' + def.partyLabel);
   var date = byId('f_date').value || todayStr();
   var _lk = (typeof lockDate === 'function') ? lockDate() : '';
-  if (_lk && (date <= _lk || (form.doc && (form.doc.date || '') <= _lk))) return fail('งวดบัญชีถึงวันที่ ' + fmtDateNum(_lk) + ' ถูกล็อกแล้ว ปลดล็อกได้ที่ การบัญชี → ปิดงบรายเดือน');
+  if (_lk && (date <= _lk || (form.doc && (form.doc.date || '') <= _lk))) return fail('งวดบัญชีถึงวันที่ ' + fmtDateNum(_lk) + ' ถูกล็อกแล้ว ' + (canEditLegal() ? 'ปลดล็อกได้ที่ การบัญชี → ปิดงบรายเดือน' : 'ต้องให้เจ้าของบริษัทปลดล็อกก่อน'));
   var extra = {};
   def.extra.forEach(function(f, i) {
     var el = byId('fx_' + i);
@@ -4533,6 +4569,9 @@ function applyCompany() {
 async function saveSettings(id, patch) {
   var cur = STORE.settings.find(function(s) { return s._id === id; });
   var rec = Object.assign({}, cur ? strip(cur) : {}, patch, { updatedAt: Date.now() });
+  // Firebase: write only the changed fields, so stale or rejected cached values are never re-sent
+  // and concurrent edits by other users to other fields are kept
+  if (FB_MODE) { await fbSaveSettings(id, Object.assign({}, patch, { updatedAt: rec.updatedAt })); return; }
   if (db) { await db.doc(cname('settings') + '/' + id).set(rec); return; }
   STORE.settings = STORE.settings.filter(function(s) { return s._id !== id; }).concat([Object.assign(rec, { _id: id })]);
   onData();
@@ -4576,11 +4615,13 @@ function openCompanySettings() {
   var cs = Object.assign({ name: companyName(), vatRegistered:'yes', fiscalStart:'1' }, companySettings());
   openModal({ title:'บัญชีและการตั้งค่า', body: '<p class="small muted" style="margin:0">ข้อมูลนี้ใช้เป็นหัวรายงานและชื่อที่แสดงด้านบน</p>' + COMPANY_FIELDS.map(function(f) { return fieldHTML(f, cs[f.key], 's_'); }).join('') + '<div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: function(b) {
-      var out = {}; COMPANY_FIELDS.forEach(function(f) { out[f.key] = byId('s_' + f.key).value.trim(); });
-      var err = !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
+      var out = {}; COMPANY_FIELDS.forEach(function(f) { if (canEditLegal() || LEGAL_FIELDS.indexOf(f.key) < 0) out[f.key] = byId('s_' + f.key).value.trim(); });
+      var err = canEditLegal() && !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
       if (err) { var e = byId('formError'); e.textContent = err; e.hidden = false; return; }
       runSave(b, async function() { await saveSettings('company', out); showToast('บันทึกการตั้งค่าบริษัทแล้ว'); closeModal(); });
     } }] });
+  if (!canEditLegal()) LEGAL_FIELDS.forEach(function(k) { var el = byId('s_' + k); if (el) { el.disabled = true; el.title = 'แก้ได้เฉพาะเจ้าของบริษัท'; } });
+  if (!canEditCompanyInfo()) { COMPANY_FIELDS.forEach(function(f) { var el = byId('s_' + f.key); if (el) el.disabled = true; }); var sb = modalFoot.lastElementChild; if (sb) sb.hidden = true; }
 }
 function openReportDefaults() {
   var cur = companySettings().defaultReportPeriod || pageState.repPeriod;
@@ -4613,7 +4654,8 @@ function openImportHub() {
       byId('impBackup').addEventListener('click', openRestore);
     } });
 }
-var BACKUP_COLLS = ['documents','contacts','products','accounts','employees','taxReturns','settings'];
+// branches first: restored documents may refer to them
+var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
 async function backupData() {
   var data = { app:'PSMacc', company: companyName(), exportedAt: new Date().toISOString() };
   BACKUP_COLLS.forEach(function(c) { data[c] = STORE[c]; });
@@ -4685,8 +4727,10 @@ function coVal(f) {
 function companyPageShell() { return ''; }
 function companyPageData() {
   var cs = companySettings();
-  var h = '<div class="co-logo-wrap"><label class="co-logo" for="coLogo" title="เปลี่ยนโลโก้">' + (cs.logo ? '<img src="' + esc(cs.logo) + '" alt="โลโก้บริษัท">' : '<svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 005.3 0 2.7 2.7 0 005.4 0 2.7 2.7 0 005.3 0"/><path d="M5 11v9h14v-9"/><path d="M10 20v-5h4v5"/></svg>') +
-    '<span class="co-pen">✎</span></label><input type="file" id="coLogo" accept="image/*" hidden>' + (cs.logo ? '<button type="button" class="chip-link" id="coLogoDel">ลบโลโก้</button>' : '') + '</div>';
+  var h = '<div class="co-logo-wrap"><label class="co-logo"' + (canEditCompanyInfo() ? ' for="coLogo" title="เปลี่ยนโลโก้"' : '') + '>' + (cs.logo ? '<img src="' + esc(cs.logo) + '" alt="โลโก้บริษัท">' : '<svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 005.3 0 2.7 2.7 0 005.4 0 2.7 2.7 0 005.3 0"/><path d="M5 11v9h14v-9"/><path d="M10 20v-5h4v5"/></svg>') +
+    (canEditCompanyInfo() ? '<span class="co-pen">✎</span>' : '') + '</label><input type="file" id="coLogo" accept="image/*" hidden>' + (cs.logo && canEditCompanyInfo() ? '<button type="button" class="chip-link" id="coLogoDel">ลบโลโก้</button>' : '') + '</div>';
+  if (!canEditCompanyInfo()) h += '<div class="banner info" id="coLegalLock">คุณมีสิทธิ์ดูอย่างเดียว</div>';
+  else if (!canEditLegal()) h += '<div class="banner info" id="coLegalLock">ชื่อบริษัท เลขผู้เสียภาษี สถานะ VAT ประเภทนิติบุคคล และข้อมูลนิติบุคคลหลักแก้ได้เฉพาะเจ้าของบริษัท</div>';
   CO_SECTIONS.forEach(function(sec, si) {
     h += '<section class="co-card"><div class="co-head"><h2>' + sec[0] + '</h2><p>' + sec[1] + '</p></div>';
     sec[2].forEach(function(f) {
@@ -4697,7 +4741,8 @@ function companyPageData() {
           : f[2] === 'area' ? '<textarea id="coInput" rows="3">' + esc(raw) + '</textarea>' : '<input id="coInput" type="' + (f[2] === 'email' ? 'email' : 'text') + '" value="' + esc(raw) + '">';
         h += '<div class="co-row editing"><div class="co-lbl">' + f[1] + '</div><div class="co-edit">' + input + '<div class="form-error" id="coErr" hidden></div><div class="co-btns"><button type="button" class="btn btn-sm" id="coCancel">ยกเลิก</button><button type="button" class="btn btn-sm btn-dark" id="coSave">บันทึก</button></div></div></div>';
       } else {
-        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div><button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button></div>';
+        var locked = !canEditCompanyInfo() || (LEGAL_FIELDS.indexOf(key) >= 0 && !canEditLegal());
+        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div>' + (locked ? '<span class="small muted" title="แก้ได้เฉพาะเจ้าของบริษัท">🔒</span>' : '<button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button>') + '</div>';
       }
     });
     h += '</section>';
@@ -5756,7 +5801,8 @@ function closeChecks(ym) {
   push({ id:'pl', group:'ตรวจทานและปิดงวด', title:'วิเคราะห์งบกำไรขาดทุนเทียบเดือนก่อน', how:'ดูรายได้/ค่าใช้จ่ายที่เปลี่ยนแปลงผิดปกติ หาสาเหตุ และแก้ไขรายการที่ลงผิด', status:'manual', detail:'ตรวจด้วยตนเอง', action:['งบกำไรขาดทุน', "pageState.repPeriod='custom';pageState.pFrom='" + start + "';pageState.pTo='" + end + "';openReport('pl')"] });
   push({ id:'bs', group:'ตรวจทานและปิดงวด', title:'ทบทวนงบดุล ทุกบัญชีมีเอกสารประกอบยอด', how:'ทุกบัญชีสินทรัพย์/หนี้สินควรมีรายละเอียดรองรับ (ใบแจ้งยอด, ทะเบียน, รายงานอายุ)', status:'manual', detail:'ตรวจด้วยตนเอง', action:['งบดุล', "pageState.repPeriod='custom';pageState.pFrom='0000-01-01';pageState.pTo='" + end + "';openReport('bs')"] });
   var locked = lockDate() >= end;
-  push({ id:'lock', group:'ตรวจทานและปิดงวด', title:'ปิดงวด (ล็อกข้อมูลถึงสิ้นเดือน)', how:'เมื่อทุกข้อเรียบร้อย ล็อกงวดเพื่อป้องกันการแก้ไขหรือเพิ่มรายการย้อนหลัง', status: locked ? 'ok' : 'bad', detail: lockDate() ? 'ล็อกถึง ' + fmtDateNum(lockDate()) : 'ยังไม่ได้ล็อกงวด', action: locked ? ['ปลดล็อก', 'unlockPeriod()'] : ['ล็อกงวดนี้', "lockPeriod('" + end + "')"] });
+  push({ id:'lock', group:'ตรวจทานและปิดงวด', title:'ปิดงวด (ล็อกข้อมูลถึงสิ้นเดือน)', how:'เมื่อทุกข้อเรียบร้อย ล็อกงวดเพื่อป้องกันการแก้ไขหรือเพิ่มรายการย้อนหลัง', status: locked ? 'ok' : 'bad', detail: lockDate() ? 'ล็อกถึง ' + fmtDateNum(lockDate()) : 'ยังไม่ได้ล็อกงวด', action: locked ? (canEditLegal() ? ['ปลดล็อก', 'unlockPeriod()'] : null) : ['ล็อกงวดนี้', "lockPeriod('" + end + "')"] });
+  if (locked && !canEditLegal()) out[out.length - 1].detail += ' · ปลดล็อกได้เฉพาะเจ้าของบริษัท';
   return out;
 }
 var MC_ST = { ok:['✓','เรียบร้อย','mc-ok'], warn:['!','ควรตรวจ','mc-warn'], bad:['✕','ต้องทำ','mc-bad'], manual:['○','ตรวจเอง','mc-man'] };
@@ -5792,8 +5838,20 @@ function bindMonthClose() {
   c.querySelectorAll('[data-mcopen]').forEach(function(el) { el.addEventListener('toggle', function() { mc.open[el.dataset.mcopen] = el.open; }); });
   c.querySelectorAll('[data-mcnote]').forEach(function(inp) { inp.onchange = async function() { var n = Object.assign({}, closeDoc(mc.ym).notes || {}); n[inp.dataset.mcnote] = inp.value.trim(); await saveSettings('close_' + mc.ym, { notes: n }); }; });
 }
-async function lockPeriod(end) { await saveSettings('company', { lockDate: end }); showToast('ล็อกงวดถึง ' + fmtDateNum(end) + ' แล้ว'); refreshPageData(); }
-async function unlockPeriod() { var ps = STORE.settings.filter(function(s) { return /^close_/.test(s._id); }); await saveSettings('company', { lockDate: '' }); showToast('ปลดล็อกงวดแล้ว'); refreshPageData(); }
+// ผู้แก้ไขล็อกงวดได้ ปลดล็อกได้เฉพาะเจ้าของ; โหมด Firebase บันทึก audit ทุกครั้ง (บังคับใน firestore.rules)
+async function setLockDate(to, action) {
+  if (FB_MODE) return fbSetLockDate(to, action);
+  await saveSettings('company', { lockDate: to });
+}
+async function lockPeriod(end) {
+  try { await setLockDate(end, 'period_lock'); showToast('ล็อกงวดถึง ' + fmtDateNum(end) + ' แล้ว'); } catch (e) { showToast(writeError(e)); }
+  refreshPageData();
+}
+async function unlockPeriod() {
+  if (!canEditLegal()) { showToast('ปลดล็อกงวดได้เฉพาะเจ้าของบริษัท'); return; }
+  try { await setLockDate('', 'period_unlock'); showToast('ปลดล็อกงวดแล้ว'); } catch (e) { showToast(writeError(e)); }
+  refreshPageData();
+}
 /* ================= Bank statement import & matching for reconcile ================= */
 rec.stmt = null; rec.match = {}; rec.selS = null;
 var STMT_FIELDS = IMP_FIELDS.bank.filter(function(f) { return f.key !== 'ref'; }).concat([{ key:'balance', label:'ยอดคงเหลือ', syn:['balance','คงเหลือ','ยอดคงเหลือ','running balance'] }, { key:'ref', label:'เลขอ้างอิง', syn:['ref','reference','เลขที่อ้างอิง','cheque no','เช็ค'] }]);
@@ -6294,7 +6352,7 @@ function openNewCompany() {
 // keep company registry name in sync with settings
 var _coSyncT = null;
 function syncCompanyRegistry() {
-  if (!db) return;
+  if (!db || !canEditLegal()) return;
   clearTimeout(_coSyncT);
   _coSyncT = setTimeout(function() {
     var cs = companySettings(), cur = COMPANIES.find(function(c) { return c._id === CUR_CO; }), name = companyName();
@@ -6302,44 +6360,107 @@ function syncCompanyRegistry() {
   }, 800);
 }
 
-/* ---- Branches ---- */
-function branches() { var b = companySettings().branches; return Array.isArray(b) ? b : []; }
+/* ---- Branches: companies/{co}/branches/{code} ----
+   used = มีเอกสารอ้างอิงแล้ว → แก้รหัสไม่ได้ ผู้แก้ไขลบไม่ได้ (ใช้ "ปิดใช้งาน" แทน) เจ้าของลบได้พร้อม audit */
+function allBranches() { return STORE.branches.slice().sort(function(a, b) { return String(a.code).localeCompare(String(b.code)); }); }
+function branches() { return allBranches().filter(function(b) { return b.active !== false; }); }
+// branches offered on a document form: active ones plus the document's current branch
+function branchesFor(cur) { return allBranches().filter(function(b) { return b.active !== false || b.code === cur; }); }
+function branchUsedByDocs(code) { return STORE.documents.some(function(d) { return d.extra && d.extra.branch === code; }); }
 function branchOf(code) {
   var cs = companySettings();
   if (!code || code === '00000') return { code:'00000', name: cs.branch || 'สำนักงานใหญ่', address: cs.legalAddress || cs.address || '', phone: cs.phone || '' };
-  return branches().find(function(b) { return b.code === code; }) || branchOf('');
+  return allBranches().find(function(b) { return b.code === code; }) || branchOf('');
 }
 function branchLabel(b) { return b.code === '00000' ? (b.name || 'สำนักงานใหญ่') : 'สาขาที่ ' + b.code + (b.name ? ' ' + b.name : ''); }
 function branchesSectionHTML() {
-  var hq = branchOf('');
+  var hq = branchOf(''), edit = canEditCompanyInfo(), owner = canEditLegal();
   return '<section class="co-card"><div class="co-head"><h2>สาขา</h2><p>สาขาและที่อยู่สาขา ใช้ในหัวเอกสาร ใบกำกับภาษี และหนังสือรับรอง 50 ทวิ</p></div>' +
-    '<div class="items-wrap"><table class="data-table"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th></th></tr></thead><tbody>' +
-    '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
-    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap"><button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button></td></tr>'; }).join('') +
-    '</tbody></table></div><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div></section>';
+    '<div class="items-wrap"><table class="data-table" id="brTable"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th>สถานะ</th><th></th></tr></thead><tbody>' +
+    '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small">ใช้งาน</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
+    allBranches().map(function(b) {
+      var c = esc(b.code), off = b.active === false, acts = [];
+      if (edit) {
+        acts.push('<button type="button" class="linkish" data-bredit="' + c + '">แก้ไข</button>');
+        acts.push('<button type="button" class="linkish" data-bractive="' + c + '">' + (off ? 'เปิดใช้งาน' : 'ปิดใช้งาน') + '</button>');
+        if (!b.used || owner) acts.push('<button type="button" class="linkish" data-brdel="' + c + '">ลบ</button>');
+      }
+      return '<tr data-brrow="' + c + '"' + (off ? ' class="muted"' : '') + '><td class="num">' + c + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td>' +
+        '<td class="small">' + (off ? 'ปิดใช้งาน' : 'ใช้งาน') + (b.used ? ' · <span title="มีเอกสารอ้างอิงแล้ว">มีประวัติ</span>' : '') + '</td><td style="white-space:nowrap">' + acts.join(' · ') + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>' + (edit ? '<p class="small muted" style="margin:6px 0 0">สาขาที่มีประวัติ (มีเอกสารอ้างอิงแล้ว) แก้รหัสไม่ได้ และลบได้เฉพาะเจ้าของบริษัท ให้ใช้ "ปิดใช้งาน" แทนการลบ</p><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div>' : '') + '</section>';
 }
-function openBranchForm(i) {
-  var list = branches().slice(), b = i != null ? list[i] : null;
+// create or replace a branch record (doc id = branch code in every storage mode)
+async function putBranch(rec) {
+  if (db) { await setRec('branches', rec.code, rec); return; }
+  var i = STORE.branches.findIndex(function(x) { return x._id === rec.code; }), r = Object.assign({}, rec, { _id: rec.code });
+  if (i >= 0) STORE.branches[i] = r; else STORE.branches.push(r);
+  sortLocal('branches'); onData();
+}
+async function deleteBranch(b) {
+  if (FB_MODE) return fbDeleteBranch(b);
+  await delRec('branches', b._id);
+}
+function openBranchForm(code) {
+  var list = allBranches(), b = code ? list.find(function(x) { return x.code === code; }) : null;
   var next = String(list.reduce(function(m, x) { return Math.max(m, Number(x.code) || 0); }, 0) + 1).padStart(5, '0');
-  var body = '<div class="grid-2"><div class="field"><label for="brCode">รหัสสาขา (5 หลัก) <b class="neg-text">*</b></label><input id="brCode" maxlength="5" inputmode="numeric" value="' + esc(b ? b.code : next) + '"></div>' +
+  var lockCode = !!(b && b.used);
+  var body = '<div class="grid-2"><div class="field"><label for="brCode">รหัสสาขา (5 หลัก) <b class="neg-text">*</b></label><input id="brCode" maxlength="5" inputmode="numeric" value="' + esc(b ? b.code : next) + '"' + (lockCode ? ' disabled title="สาขานี้มีเอกสารอ้างอิงแล้ว แก้รหัสไม่ได้"' : '') + '></div>' +
     '<div class="field"><label for="brName">ชื่อสาขา</label><input id="brName" value="' + esc(b ? b.name : '') + '" placeholder="เช่น สาขาเชียงใหม่"></div></div>' +
     '<div class="field"><label for="brAddr">ที่อยู่สาขา <b class="neg-text">*</b></label><textarea id="brAddr" rows="3">' + esc(b ? b.address : '') + '</textarea></div>' +
-    '<div class="field"><label for="brPhone">โทรศัพท์</label><input id="brPhone" value="' + esc(b ? b.phone || '' : '') + '"></div><div class="form-error" id="formError" hidden></div>';
+    '<div class="field"><label for="brPhone">โทรศัพท์</label><input id="brPhone" value="' + esc(b ? b.phone || '' : '') + '"></div>' +
+    (lockCode ? '<p class="small muted" style="margin:0">สาขานี้มีเอกสารอ้างอิงแล้ว จึงแก้รหัสสาขาไม่ได้ ถ้าต้องการรหัสใหม่ ให้ปิดใช้งานสาขานี้แล้วเพิ่มสาขาใหม่</p>' : '') + '<div class="form-error" id="formError" hidden></div>';
   openModal({ title: b ? 'แก้ไขสาขา' : 'เพิ่มสาขา', body: body, buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: async function(btn) {
-    var err = byId('formError'), code = byId('brCode').value.trim(), addr = byId('brAddr').value.trim();
-    if (!/^\d{5}$/.test(code) || code === '00000') { err.textContent = 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00001 ขึ้นไป)'; err.hidden = false; return; }
-    if (list.some(function(x, k) { return x.code === code && k !== i; })) { err.textContent = 'รหัสสาขาซ้ำ'; err.hidden = false; return; }
+    var err = byId('formError'), nc = byId('brCode').value.trim(), addr = byId('brAddr').value.trim();
+    if (!/^\d{5}$/.test(nc) || nc === '00000') { err.textContent = 'รหัสสาขาต้องเป็นตัวเลข 5 หลัก (00001 ขึ้นไป)'; err.hidden = false; return; }
+    if (list.some(function(x) { return x.code === nc && x !== b; })) { err.textContent = 'รหัสสาขาซ้ำ'; err.hidden = false; return; }
     if (!addr) { err.textContent = 'กรุณาระบุที่อยู่สาขา'; err.hidden = false; return; }
-    var rec = { code: code, name: byId('brName').value.trim(), address: addr, phone: byId('brPhone').value.trim() };
-    if (b) list[i] = rec; else list.push(rec);
-    list.sort(function(x, y) { return x.code.localeCompare(y.code); });
-    btn.disabled = true; await saveSettings('company', { branches: list }); closeModal(); showToast('บันทึกสาขาแล้ว');
+    var rec = { code: nc, name: byId('brName').value.trim(), address: addr, phone: byId('brPhone').value.trim(), active: b ? b.active !== false : true, used: b && b.code === nc ? !!b.used : branchUsedByDocs(nc), createdAt: b && b.code === nc ? b.createdAt : Date.now() };
+    btn.disabled = true;
+    try {
+      await putBranch(rec);
+      if (b && b.code !== nc) await deleteBranch(b); // code changed on a branch without history
+      closeModal(); showToast('บันทึกสาขาแล้ว');
+    } catch (e) { btn.disabled = false; err.textContent = writeError(e); err.hidden = false; }
   } }] });
 }
 function bindBranches(c) {
+  var find = function(code) { return allBranches().find(function(x) { return x.code === code; }); };
   c.querySelectorAll('[data-bradd]').forEach(function(b) { b.onclick = function() { openBranchForm(null); }; });
-  c.querySelectorAll('[data-bredit]').forEach(function(b) { b.onclick = function() { openBranchForm(Number(b.dataset.bredit)); }; });
-  c.querySelectorAll('[data-brdel]').forEach(function(b) { b.onclick = async function() { var list = branches().slice(); list.splice(Number(b.dataset.brdel), 1); await saveSettings('company', { branches: list }); showToast('ลบสาขาแล้ว'); }; });
+  c.querySelectorAll('[data-bredit]').forEach(function(b) { b.onclick = function() { openBranchForm(b.dataset.bredit); }; });
+  c.querySelectorAll('[data-bractive]').forEach(function(b) { b.onclick = async function() {
+    var br = find(b.dataset.bractive);
+    try { await putBranch(Object.assign(strip(br), { active: br.active === false })); showToast(br.active === false ? 'เปิดใช้งานสาขาแล้ว' : 'ปิดใช้งานสาขาแล้ว'); } catch (e) { showToast(writeError(e)); }
+  }; });
+  c.querySelectorAll('[data-brdel]').forEach(function(b) { b.onclick = async function() {
+    var br = find(b.dataset.brdel);
+    if (!confirm(br.used ? 'สาขา ' + br.code + ' มีเอกสารอ้างอิงแล้ว การลบจะถูกบันทึกในประวัติ เอกสารเดิมยังแสดงรหัสสาขานี้ ยืนยันลบ?' : 'ลบสาขา ' + br.code + '?')) return;
+    try { await deleteBranch(br); showToast('ลบสาขาแล้ว'); } catch (e) { showToast(writeError(e)); }
+  }; });
+}
+// a document that refers to a branch marks the branch as used first (enforced by firestore.rules)
+async function markBranchUsed(rec) {
+  var code = rec && rec.extra && rec.extra.branch;
+  if (!code || code === '00000') return;
+  var b = STORE.branches.find(function(x) { return x.code === code; });
+  if (b && !b.used) await putBranch(Object.assign(strip(b), { used: true }));
+}
+// one-time move from the old settings.branches list to branch records
+var _brMigrating = false;
+function migrateLegacyBranches() {
+  var legacy = companySettings().branches;
+  if (_brMigrating || !Array.isArray(legacy) || !canEditCompanyInfo() || !collectionsLoaded()) return;
+  _brMigrating = true;
+  (async function() {
+    try {
+      for (var i = 0; i < legacy.length; i++) {
+        var x = legacy[i] || {};
+        if (!/^\d{5}$/.test(x.code || '') || x.code === '00000' || STORE.branches.some(function(b) { return b.code === x.code; })) continue;
+        await putBranch({ code: x.code, name: x.name || '', address: x.address || '', phone: x.phone || '', active: true, used: branchUsedByDocs(x.code), createdAt: Date.now() + i });
+      }
+      await saveSettings('company', { branches: null });
+    } catch (e) {} finally { _brMigrating = false; }
+  })();
 }
 // company-info view for a document (uses the document's branch)
 function coInfoFor(d) {
