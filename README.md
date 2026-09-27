@@ -98,13 +98,14 @@ npx playwright install chromium   # ครั้งแรกครั้งเ�
 npm run build                     # ประกอบ dist/ และ index.html จาก src/
 npm test                          # รันทุกชุดด้านล่าง
 ```
-| คำสั่ง | ทดสอบอะไร |
-|---|---|
-| `npm run test:smoke` | โหมดเบราว์เซอร์และโหมด Claude DB: เปิดทุกหน้า สร้าง/สลับบริษัท การบันทึกข้อมูล ไม่มี error |
-| `npm run test:rules` | `firestore.rules`: แยกข้อมูลหลายบริษัท สิทธิ์ทุกระดับ คำเชิญ เจ้าของหลัก โอนสิทธิ์ Audit Log |
-| `npm run test:e2e` | ใช้งานจริงผ่านเบราว์เซอร์กับ Firebase Emulator: สมัคร Login Logout ลืมรหัสผ่าน เชิญ นำออก โอนสิทธิ์ |
-| `npm run check:dist` | ไฟล์ใน `dist/` และ `index.html` ตรงกับ `src/` (ลืมรัน build หรือไม่) |
+| คำสั่ง | ทดสอบอะไร | รหัส test case |
+|---|---|---|
+| `npm run test:smoke` | โหมดเบราว์เซอร์และโหมด Claude DB: เปิดทุกหน้า สร้าง/สลับบริษัท ไม่มี error | S-xx |
+| `npm run test:rules` | `firestore.rules` ยิงตรงไปที่ฐานข้อมูล: ผู้ไม่ได้ Login, แยกข้อมูลหลายบริษัท (อ่าน/เขียน/ลบ), สิทธิ์ตามบทบาท, เจ้าของหลัก, โอนสิทธิ์, ห้ามเพิ่มสิทธิ์ตัวเอง, คำเชิญ, Audit Log, นำออก | R1–R11 |
+| `npm run test:regression` | bug ที่เคยพบจริงแต่ละตัว ต้องไม่กลับมา | REG-01–REG-13 |
+| `npm run test:e2e` | ใช้งานจริงผ่านเบราว์เซอร์กับ Firebase Emulator: สมัคร Login Logout ลืมรหัสผ่าน เชิญ นำออก โอนสิทธิ์ | |
+| `npm run check:dist` | ไฟล์ใน `dist/` และ `index.html` ตรงกับ `src/` (ลืมรัน build หรือไม่) | |
 
-`test:rules` และ `test:e2e` เปิด Firebase Emulator ให้เองด้วยโปรเจกต์จำลอง `demo-psmacc` ไม่แตะ Firebase จริง
+`test:rules`, `test:regression` และ `test:e2e` เปิด Firebase Emulator ให้เองด้วยโปรเจกต์จำลอง `demo-psmacc` ไม่แตะ Firebase จริง
 ทุก push และ Pull Request จะรันชุดทดสอบนี้อัตโนมัติบน GitHub Actions (`.github/workflows/test.yml`)
 **ถ้าแก้ `firestore.rules` ต้องให้ `npm run test:rules` ผ่านก่อน Publish ทุกครั้ง**

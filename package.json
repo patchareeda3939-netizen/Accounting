@@ -7,8 +7,9 @@
     "check:dist": "bash build.sh && git diff --exit-code -- dist index.html",
     "test:smoke": "node tests/smoke.test.js",
     "test:rules": "firebase emulators:exec --only auth,firestore --project demo-psmacc \"node tests/rules.test.mjs\"",
+    "test:regression": "firebase emulators:exec --only auth,firestore --project demo-psmacc \"node tests/regression.test.js\"",
     "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-psmacc \"node tests/e2e.test.js\"",
-    "test:firebase": "firebase emulators:exec --only auth,firestore --project demo-psmacc \"node tests/rules.test.mjs && node tests/e2e.test.js\"",
+    "test:firebase": "firebase emulators:exec --only auth,firestore --project demo-psmacc \"node tests/rules.test.mjs && node tests/regression.test.js && node tests/e2e.test.js\"",
     "test": "npm run test:smoke && npm run test:firebase"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 // Smoke test โหมดที่ไม่ใช้ Firebase: เก็บข้อมูลในเบราว์เซอร์ (localStorage) และฐานข้อมูล Claude (จำลองด้วย mockdb.js)
-// เปิดทุกเมนูทุกหน้า สร้าง/สลับบริษัท และตรวจว่าไม่มี error บนหน้าเว็บ
+// เปิดทุกเมนูทุกหน้า สร้าง/สลับบริษัท และตรวจว่าไม่มี error บนหน้าเว็บ (bug เดิมแต่ละตัวอยู่ใน regression.test.js)
 // รัน: npm run test:smoke (ต้องรัน npm run build ก่อนถ้าแก้ src/)
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -63,28 +63,8 @@ async function createAndSwitch(p, label) {
   // ---- localStorage mode
   const p = await open(browser, 'local.html');
   check('local: runs without a database', await p.evaluate(() => !db && !byId('modeBadge').hidden));
-  check('local: default company name', /บริษัทของฉัน/.test(await p.textContent('#companyPill')));
   await visitAllPages(p, 'local');
-  const coId = await createAndSwitch(p, 'local');
-  // ids stay unique after switching back to a company already in memory
-  await p.evaluate(async id => { switchCompany(id); await addRec('contacts', { name: 'X1' }); switchCompany('main'); await addRec('contacts', { name: 'M1' }); switchCompany(id); await addRec('contacts', { name: 'X2' }); }, coId);
-  check('local: record ids unique per company', await p.evaluate(() => { const ids = Object.values(STORE).flat().map(r => r._id); return ids.length === new Set(ids).size; }));
-  // an edit immediately followed by a switch must still be saved
-  await p.evaluate(async () => { await addRec('contacts', { name: 'FAST' }); switchCompany('main'); });
-  await p.reload(); await p.waitForTimeout(800);
-  check('local: company list survives reload', (await p.evaluate(() => coList().map(c => c.name))).includes('บริษัท ทดสอบ จำกัด'));
-  await p.evaluate(id => switchCompany(id), coId); await p.waitForTimeout(200);
-  const names = await p.evaluate(() => STORE.contacts.map(c => c.name).sort());
-  check('local: quick edit before switch is persisted', JSON.stringify(names) === '["FAST","X1","X2"]', names);
-  // storage full → user is told
-  await p.evaluate(() => { const o = Storage.prototype.setItem; Storage.prototype.setItem = function(k, v) { if (k.startsWith('psmacc_data')) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; } return o.call(this, k, v); }; });
-  await p.evaluate(async () => { await addRec('contacts', { name: 'Q' }); }); await p.waitForTimeout(500);
-  check('local: warns when browser storage is full', /ไม่สำเร็จ/.test(await p.textContent('#toast')));
-  // reconcile page with no bank accounts (fresh company)
-  const p2 = await open(browser, 'local.html');
-  await p2.evaluate(() => { localStorage.clear(); }); await p2.reload(); await p2.waitForTimeout(600);
-  await p2.evaluate(() => document.querySelector('.subnav-child[data-child-key="reconcile"]').click()); await p2.waitForTimeout(300);
-  check('local: reconcile page with no bank accounts shows empty state', /ยังไม่มีบัญชีธนาคาร/.test(await p2.textContent('#pageData')) && p2.errs.length === 0, p2.errs);
+  await createAndSwitch(p, 'local');
   check('local: no page errors', p.errs.length === 0, p.errs);
 
   // ---- Claude database mode (mock)
@@ -95,7 +75,7 @@ async function createAndSwitch(p, label) {
   check('claude-db: no page errors', c.errs.length === 0, c.errs);
 
   await browser.close();
-  for (const r of results) console.log((r.ok ? 'PASS  ' : 'FAIL  ') + r.name + (r.ok || r.extra === undefined ? '' : '  ' + JSON.stringify(r.extra)));
+  results.forEach((r, i) => console.log((r.ok ? 'PASS' : 'FAIL') + '  S-' + String(i + 1).padStart(2, '0') + '  ' + r.name + (r.ok || r.extra === undefined ? '' : '  ' + JSON.stringify(r.extra))));
   const failed = results.filter(r => !r.ok).length;
   console.log('\n' + failed + ' failed / ' + results.length);
   process.exit(failed ? 1 : 0);

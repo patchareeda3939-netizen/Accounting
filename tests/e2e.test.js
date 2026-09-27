@@ -31,7 +31,7 @@ async function page(b) {
   await p.goto(APP); await p.waitForSelector('#auEmail', { timeout: 15000 }); return p;
 }
 async function signup(p, email) {
-  await p.click('[data-auth="signup"]'); await p.fill('#auEmail', email); await p.fill('#auPw', 'secret123'); await p.fill('#auPw2', 'secret123'); await p.click('#authSubmit');
+  await p.click('[data-auth="signup"]'); await p.fill('#auEmail', email); await p.fill('#auPw', 'test-only-password'); await p.fill('#auPw2', 'test-only-password'); await p.click('#authSubmit');
 }
 async function verify(email) {
   const r = await (await fetch(AUTH + '/emulator/v1/projects/' + PROJECT + '/oobCodes')).json();
