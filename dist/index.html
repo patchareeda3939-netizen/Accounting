@@ -881,7 +881,7 @@ function fbWatchRole() {
 }
 /* ---- Viewer: hide create/edit/delete controls everywhere (firestore.rules block the writes anyway) ---- */
 var RO_TEXT = /^\s*(\+|สร้าง|เพิ่ม|บันทึก|แก้ไข|ลบ|ยกเลิกเอกสาร|ยกเลิกคู่|กู้คืน|รับชำระ|จ่ายชำระ|ถอน|ฝาก|ปรับ|นำเข้า|ล้าง|ล็อก|ปลดล็อก|ทำเครื่องหมาย|ย้อน|เริ่มกระทบยอด|กระทบยอดใหม่|จับคู่|ทำต่อ|โครงการใหม่|ทำซ้ำ|คัดลอกเป็น|แปลงเป็น|อนุมัติ|ปิด Statement|เสร็จ)/;
-var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
+var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, .att-add, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
 var RO_KEEP = '#authScreen *, #accNameSave';
 var RO_DISABLE = '[data-mcdone], [data-mcnote], [data-ocr], [data-ocri]';
 function roApply() {
@@ -947,6 +947,43 @@ function fbOpenAccount(fresh) {
 /* ---- Users & roles of the current company ---- */
 var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก', period_lock:'ล็อกงวดบัญชี', period_unlock:'ปลดล็อกงวดบัญชี', branch_delete:'ลบสาขา' };
 function fbSaveSettings(id, patch) { var v = fbEncode(patch); return FB.fs.doc('companies/' + CUR_CO + '/settings/' + id).set(v, { mergeFields: Object.keys(v) }); }
+/* ---- File attachments: Firebase Storage (companies/{co}/files/{id}, see storage.rules) ---- */
+var ATT_MAX = 20 * 1024 * 1024;
+var ATT_TYPES = /^(image\/[a-z0-9.+-]+|application\/pdf|application\/json|text\/(plain|csv|markdown))$/;
+var _fbStorageP = null;
+function fbStorage() {
+  if (!_fbStorageP) {
+    _fbStorageP = loadScriptOnce(FB_SDK + 'firebase-storage-compat.js', function() { return !!firebase.storage; }).then(function() {
+      if (!FIREBASE_CONFIG.storageBucket) throw { code: 'no_bucket' };
+      var st = firebase.storage();
+      if (typeof FIREBASE_EMULATOR_HOST !== 'undefined' && FIREBASE_EMULATOR_HOST) st.useEmulator(FIREBASE_EMULATOR_HOST, 9199);
+      return st;
+    });
+    _fbStorageP.catch(function() { _fbStorageP = null; });
+  }
+  return _fbStorageP;
+}
+function attType(f) {
+  if (f.type) return f.type;
+  var ext = (/\.([a-z0-9]+)$/i.exec(f.name || '') || [])[1] || '';
+  return { csv:'text/csv', txt:'text/plain', md:'text/markdown', json:'application/json', pdf:'application/pdf' }[ext.toLowerCase()] || '';
+}
+// same interface as the Claude assets capability: upload(file) -> { id, contentType, sizeBytes } (+ path)
+var FB_ASSETS = {
+  upload: async function(f) {
+    var type = attType(f);
+    if (f.size > ATT_MAX) throw { code: 'too_large' };
+    if (!ATT_TYPES.test(type)) throw { code: 'unsupported_type' };
+    var st = await fbStorage(), id = Date.now().toString(36) + Math.random().toString(36).slice(2, 10), path = 'companies/' + CUR_CO + '/files/' + id;
+    try {
+      var snap = await st.ref(path).put(f, { contentType: type, customMetadata: { uid: FB.user.uid, name: encodeURIComponent(f.name || '') } });
+    } catch (e) {
+      throw { code: e && e.code === 'storage/unauthorized' ? 'not_granted' : e && e.code === 'storage/quota-exceeded' ? 'quota_or_state' : 'storage_off', message: e && e.message };
+    }
+    return { id: id, path: path, contentType: snap.metadata.contentType, sizeBytes: snap.metadata.size };
+  }
+};
+async function fbFileUrl(a) { return (await fbStorage()).ref(a.path).getDownloadURL(); }
 // period lock: settings/company.lockDate + audit entry in one batch
 async function fbSetLockDate(to, action) {
   var fs = FB.fs, co = CUR_CO, b = fs.batch(), ref = fs.collection('companies/' + co + '/audit').doc();
@@ -2186,6 +2223,14 @@ async function ensureVatAccounts() {
 /* ---- Attachments (assets capability) ---- */
 var ASSETS = null;
 if (window.claude && window.claude.use) window.claude.use('assets').then(function(a) { ASSETS = a; var m = byId('attMsg'); if (m && !a) m.textContent = 'แนบไฟล์ได้เฉพาะผู้มีสิทธิ์แก้ไข'; }).catch(function() {});
+// Claude assets in the artifact, Firebase Storage when signed in to Firebase
+async function getAssets() {
+  if (ASSETS) return ASSETS;
+  if (FB_MODE) return (ASSETS = FB_ASSETS);
+  try { ASSETS = window.claude && window.claude.use ? await window.claude.use('assets') : null; } catch (e) { ASSETS = null; }
+  return ASSETS;
+}
+function attRecord(r, f) { var a = { id: r.id, name: f.name, type: r.contentType || f.type, size: r.sizeBytes || f.size }; if (r.url) a.url = r.url; if (r.path) a.path = r.path; return a; }
 function attUrl(a) { return a.url || ('/_blob/' + a.id); }
 function attIcon(a) { return /^image\//.test(a.type || '') ? '🖼' : /pdf/.test(a.type || '') ? '📄' : '📎'; }
 function attLinksHTML(list) {
@@ -2201,13 +2246,13 @@ function renderAttList() {
 document.addEventListener('change', async function(e) {
   if (!e.target || e.target.id !== 'attInput') return;
   var inp = e.target, msg = byId('attMsg'), files = Array.from(inp.files || []);
-  if (!ASSETS) ASSETS = window.claude && window.claude.use ? await window.claude.use('assets') : null;
+  await getAssets();
   if (!ASSETS) { if (msg) msg.textContent = 'ไม่สามารถแนบไฟล์ในมุมมองนี้ได้'; inp.value = ''; return; }
   for (var k = 0; k < files.length; k++) {
     var f = files[k];
     if (msg) msg.textContent = 'กำลังอัปโหลด ' + f.name + ' …';
-    try { var r = await ASSETS.upload(f); form.attachments.push({ id: r.id, url: r.url, name: f.name, type: r.contentType || f.type, size: r.sizeBytes || f.size }); renderAttList(); if (msg) msg.textContent = 'อัปโหลดแล้ว — กดบันทึกเอกสารเพื่อเก็บไฟล์แนบ'; }
-    catch (err) { if (msg) msg.textContent = 'อัปโหลด ' + f.name + ' ไม่สำเร็จ: ' + ({ too_large:'ไฟล์ใหญ่เกินไป', unsupported_type:'ไม่รองรับชนิดไฟล์นี้', quota_or_state:'พื้นที่เก็บไฟล์เต็ม', not_granted:'ไม่ได้รับอนุญาต' }[err && err.code] || (err && err.message) || 'ข้อผิดพลาด'); }
+    try { var r = await ASSETS.upload(f); form.attachments.push(attRecord(r, f)); renderAttList(); if (msg) msg.textContent = 'อัปโหลดแล้ว — กดบันทึกเอกสารเพื่อเก็บไฟล์แนบ'; }
+    catch (err) { if (msg) msg.textContent = 'อัปโหลด ' + f.name + ' ไม่สำเร็จ: ' + ({ too_large:'ไฟล์ใหญ่เกินไป', unsupported_type:'ไม่รองรับชนิดไฟล์นี้', quota_or_state:'พื้นที่เก็บไฟล์เต็ม', not_granted:'ไม่ได้รับอนุญาต', storage_off:'ยังไม่ได้เปิดใช้ Firebase Storage หรือเชื่อมต่อไม่ได้', no_bucket:'ยังไม่ได้ตั้งค่า storageBucket' }[err && err.code] || (err && err.message) || 'ข้อผิดพลาด'); }
   }
   inp.value = '';
 });
@@ -2217,6 +2262,7 @@ document.addEventListener('click', function(e) {
   e.preventDefault(); try { openAttachment(JSON.parse(el.dataset.attopen)); } catch (err) {}
 }, true);
 async function attBlob(a) {
+  if (a.path) { var fr = await fetch(await fbFileUrl(a)); if (!fr.ok) throw new Error('HTTP ' + fr.status); return await fr.blob(); }
   var r = await fetch(attUrl(a), { credentials: 'include' });
   if (!r.ok) r = await fetch('/_blob/' + a.id, { credentials: 'include' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2232,19 +2278,25 @@ async function openAttachment(a) {
   ov.addEventListener('click', async function(ev) {
     if (ev.target === ov || (ev.target.dataset && ev.target.dataset.av === 'close')) return close();
     if (ev.target.dataset && ev.target.dataset.av === 'dl') {
-      try { var dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; var b = blob || await attBlob(a);
-        if (dl) await dl.save({ filename: a.name, data: b }); else { var u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = a.name; x.click(); setTimeout(function() { URL.revokeObjectURL(u); }, 5000); }
+      try { var dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; var b = blob || await attBlob(a).catch(function(e) { if (a.path) return null; throw e; });
+        if (dl) await dl.save({ filename: a.name, data: b });
+        else if (!b) window.open(await fbFileUrl(a), '_blank', 'noopener'); else { var u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = a.name; x.click(); setTimeout(function() { URL.revokeObjectURL(u); }, 5000); }
       } catch (err) { body.insertAdjacentHTML('afterbegin', '<div class="muted">ดาวน์โหลดไม่สำเร็จ</div>'); }
     }
   });
   var body = ov.querySelector('.att-vbody');
   try {
+    // Storage files: images load straight from their URL; other files are fetched (needs CORS on the bucket)
+    if (a.path && /^image\//.test(a.type || '')) { body.innerHTML = '<img src="' + esc(await fbFileUrl(a)) + '" alt="' + esc(a.name) + '">'; return; }
     blob = await attBlob(a); obj = URL.createObjectURL(blob);
     var t = blob.type || a.type || '';
     if (/^image\//.test(t)) body.innerHTML = '<img src="' + obj + '" alt="' + esc(a.name) + '">';
     else if (/pdf/.test(t) || /\.pdf$/i.test(a.name)) await renderPdfInto(body, blob);
     else { var txt = await blob.text(); body.innerHTML = '<pre></pre>'; body.firstChild.textContent = txt.slice(0, 200000); }
-  } catch (err) { body.innerHTML = '<div class="muted">เปิดไฟล์ไม่ได้ (' + esc(err.message || '') + ') ลองกดดาวน์โหลด</div>'; }
+  } catch (err) {
+    body.innerHTML = '<div class="muted">เปิดไฟล์ไม่ได้ (' + esc(err.message || err.code || '') + ') ลองกดดาวน์โหลด</div>';
+    if (a.path) fbFileUrl(a).then(function(u) { body.insertAdjacentHTML('beforeend', '<p><a href="' + esc(u) + '" target="_blank" rel="noopener">เปิดไฟล์ในแท็บใหม่</a></p>'); }, function() {});
+  }
 }
 
 var PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
@@ -6814,8 +6866,8 @@ async function ocrCreate(i, btn) {
   try {
     if (!STORE.contacts.some(function(c) { return c.name === d.vendorName; })) await addRec('contacts', { name: d.vendorName, kind:'supplier', entity: /บริษัท|หจก|ห้างหุ้นส่วน|จำกัด/.test(d.vendorName) ? 'company' : 'person', taxId: /^\d{13}$/.test(d.vendorTaxId) ? d.vendorTaxId : '', branch: d.vendorBranch || '', address: d.vendorAddress || '', createdAt: Date.now() });
     var att = [];
-    var A = typeof ASSETS !== 'undefined' && ASSETS ? ASSETS : (window.claude && window.claude.use ? await window.claude.use('assets') : null);
-    if (A) { try { var up = await A.upload(it.file); att.push({ id: up.id, url: up.url, name: it.file.name, type: up.contentType || it.file.type, size: up.sizeBytes || it.file.size }); } catch (e) {} }
+    var A = await getAssets();
+    if (A) { try { att.push(attRecord(await A.upload(it.file), it.file)); } catch (e) {} }
     var t = ocrTotals(d), type = d.kind === 'bill' ? 'bill' : 'expense', def = DOC_TYPES[type], a = d.account && STORE.accounts.find(function(x) { return x.code === d.account; });
     var extra = { supInvNo: d.docNo, supInvDate: d.date, account: a ? a.code : '', expCategory: a ? a.name : '', attachments: att, note: 'อ่านจากเอกสาร ' + it.file.name, ocr: true };
     if (type === 'expense') extra.method = 'โอนเงิน'; else if (d.dueDate) extra.dueDate = d.dueDate;

@@ -155,7 +155,7 @@ function fbWatchRole() {
 }
 /* ---- Viewer: hide create/edit/delete controls everywhere (firestore.rules block the writes anyway) ---- */
 var RO_TEXT = /^\s*(\+|สร้าง|เพิ่ม|บันทึก|แก้ไข|ลบ|ยกเลิกเอกสาร|ยกเลิกคู่|กู้คืน|รับชำระ|จ่ายชำระ|ถอน|ฝาก|ปรับ|นำเข้า|ล้าง|ล็อก|ปลดล็อก|ทำเครื่องหมาย|ย้อน|เริ่มกระทบยอด|กระทบยอดใหม่|จับคู่|ทำต่อ|โครงการใหม่|ทำซ้ำ|คัดลอกเป็น|แปลงเป็น|อนุมัติ|ปิด Statement|เสร็จ)/;
-var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
+var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, .att-add, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
 var RO_KEEP = '#authScreen *, #accNameSave';
 var RO_DISABLE = '[data-mcdone], [data-mcnote], [data-ocr], [data-ocri]';
 function roApply() {
@@ -221,6 +221,43 @@ function fbOpenAccount(fresh) {
 /* ---- Users & roles of the current company ---- */
 var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก', period_lock:'ล็อกงวดบัญชี', period_unlock:'ปลดล็อกงวดบัญชี', branch_delete:'ลบสาขา' };
 function fbSaveSettings(id, patch) { var v = fbEncode(patch); return FB.fs.doc('companies/' + CUR_CO + '/settings/' + id).set(v, { mergeFields: Object.keys(v) }); }
+/* ---- File attachments: Firebase Storage (companies/{co}/files/{id}, see storage.rules) ---- */
+var ATT_MAX = 20 * 1024 * 1024;
+var ATT_TYPES = /^(image\/[a-z0-9.+-]+|application\/pdf|application\/json|text\/(plain|csv|markdown))$/;
+var _fbStorageP = null;
+function fbStorage() {
+  if (!_fbStorageP) {
+    _fbStorageP = loadScriptOnce(FB_SDK + 'firebase-storage-compat.js', function() { return !!firebase.storage; }).then(function() {
+      if (!FIREBASE_CONFIG.storageBucket) throw { code: 'no_bucket' };
+      var st = firebase.storage();
+      if (typeof FIREBASE_EMULATOR_HOST !== 'undefined' && FIREBASE_EMULATOR_HOST) st.useEmulator(FIREBASE_EMULATOR_HOST, 9199);
+      return st;
+    });
+    _fbStorageP.catch(function() { _fbStorageP = null; });
+  }
+  return _fbStorageP;
+}
+function attType(f) {
+  if (f.type) return f.type;
+  var ext = (/\.([a-z0-9]+)$/i.exec(f.name || '') || [])[1] || '';
+  return { csv:'text/csv', txt:'text/plain', md:'text/markdown', json:'application/json', pdf:'application/pdf' }[ext.toLowerCase()] || '';
+}
+// same interface as the Claude assets capability: upload(file) -> { id, contentType, sizeBytes } (+ path)
+var FB_ASSETS = {
+  upload: async function(f) {
+    var type = attType(f);
+    if (f.size > ATT_MAX) throw { code: 'too_large' };
+    if (!ATT_TYPES.test(type)) throw { code: 'unsupported_type' };
+    var st = await fbStorage(), id = Date.now().toString(36) + Math.random().toString(36).slice(2, 10), path = 'companies/' + CUR_CO + '/files/' + id;
+    try {
+      var snap = await st.ref(path).put(f, { contentType: type, customMetadata: { uid: FB.user.uid, name: encodeURIComponent(f.name || '') } });
+    } catch (e) {
+      throw { code: e && e.code === 'storage/unauthorized' ? 'not_granted' : e && e.code === 'storage/quota-exceeded' ? 'quota_or_state' : 'storage_off', message: e && e.message };
+    }
+    return { id: id, path: path, contentType: snap.metadata.contentType, sizeBytes: snap.metadata.size };
+  }
+};
+async function fbFileUrl(a) { return (await fbStorage()).ref(a.path).getDownloadURL(); }
 // period lock: settings/company.lockDate + audit entry in one batch
 async function fbSetLockDate(to, action) {
   var fs = FB.fs, co = CUR_CO, b = fs.batch(), ref = fs.collection('companies/' + co + '/audit').doc();

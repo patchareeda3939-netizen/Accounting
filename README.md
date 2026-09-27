@@ -97,13 +97,30 @@ Settings → Pages → Source: `main` branch, โฟลเดอร์ `/ (root)
 
 ค่าใน `src/config.js` เปิดเผยได้ ความปลอดภัยของข้อมูลมาจาก `firestore.rules` ต้อง Publish rules ทุกครั้งที่แก้ไฟล์นี้
 
+### ไฟล์แนบ (Firebase Storage)
+ไฟล์แนบของเอกสารเก็บใน Firebase Storage ที่ `companies/{บริษัท}/files/{id}` สิทธิ์ตาม `storage.rules`:
+สมาชิกบริษัทเปิดดูได้, เจ้าของและผู้แก้ไขอัปโหลดได้ (รูปภาพ PDF CSV TXT JSON MD ไม่เกิน 20 MB), แก้ไขหรือลบไฟล์ไม่ได้ (เก็บเป็นหลักฐาน)
+1. **Storage → Get started** (โปรเจกต์ใหม่ต้องใช้แพ็กเกจ Blaze จึงจะสร้าง bucket ได้ ยังมีโควตาใช้ฟรี) เลือก production mode
+2. **Storage → Rules** คัดลอกเนื้อหาไฟล์ `storage.rules` ไปวางแล้วกด **Publish**
+   ครั้งแรก Console จะขอสิทธิ์ให้ Storage อ่าน Firestore ได้ (ใช้ตรวจสมาชิกบริษัท) ให้กด Allow
+   (หรือ `npx firebase-tools deploy --only storage --project <project-id>`)
+3. ตรวจว่า `storageBucket` ใน `src/config.js` ตรงกับชื่อ bucket ในหน้า Storage
+4. (ไม่บังคับ) ถ้าต้องการพรีวิว PDF/ไฟล์ข้อความในหน้าเว็บ ต้องเปิด CORS ของ bucket ด้วย Cloud Shell:
+   ```
+   echo '[{"origin":["https://<ชื่อผู้ใช้>.github.io"],"method":["GET"],"maxAgeSeconds":3600}]' > cors.json
+   gcloud storage buckets update gs://<bucket> --cors-file=cors.json
+   ```
+   ถ้าไม่ตั้ง รูปภาพยังแสดงได้ ไฟล์อื่นจะมีลิงก์ "เปิดไฟล์ในแท็บใหม่" แทน
+
+ถ้ายังไม่เปิด Storage ส่วนอื่นของแอปใช้งานได้ตามปกติ เพียงแนบไฟล์ไม่ได้ (แจ้งว่า "ยังไม่ได้เปิดใช้ Firebase Storage")
+
 ### การใช้งาน
 - ผู้ใช้ใหม่สมัครสมาชิกแล้วสร้างบริษัทแรก ผู้สร้างเป็นเจ้าของบริษัท
 - เจ้าของเชิญผู้ใช้จาก **ชื่อบริษัทมุมซ้ายบน → จัดการผู้ใช้** ระบบไม่ส่งอีเมลเชิญให้
   ต้องแจ้งผู้ใช้เองให้สมัครด้วยอีเมลที่เชิญและกดลิงก์ยืนยันอีเมล จากนั้นบริษัทจะปรากฏเมื่อเข้าสู่ระบบ
 - ย้ายข้อมูลเดิมจากโหมดเบราว์เซอร์: ในโหมดเดิมใช้ ฟันเฟือง → สำรองข้อมูลบริษัท แล้วเข้าสู่ระบบ Firebase และใช้ กู้คืนจากไฟล์สำรองข้อมูล
 - ผู้ดูเห็นข้อมูลแบบอ่านอย่างเดียว ปุ่มสร้าง/แก้ไข/ลบถูกซ่อน (และ firestore.rules ปฏิเสธการเขียนอยู่แล้ว)
-- ข้อจำกัด: แนบไฟล์และอ่านเอกสารด้วย Claude ใช้ไม่ได้ในโหมดนี้,
+- ข้อจำกัด: อ่านเอกสารด้วย Claude (OCR) ใช้ไม่ได้ในโหมดนี้, ไฟล์แนบที่กู้คืนเข้าบริษัทอื่นยังชี้ไปที่ไฟล์ของบริษัทเดิม (เปิดได้เฉพาะสมาชิกบริษัทเดิม),
   ทุกครั้งที่เปิดแอประบบจะอ่านข้อมูลทั้งบริษัท ควรตรวจสอบโควตาและค่าบริการของ Firebase เมื่อข้อมูลมาก
 
 ### สำรองข้อมูล
@@ -120,7 +137,7 @@ Settings → Pages → Source: `main` branch, โฟลเดอร์ `/ (root)
 ### ทดสอบกับ Firebase Emulator
 ตั้ง `FIREBASE_CONFIG` เป็นค่าใดก็ได้ที่มี `apiKey` และ `projectId: 'demo-psmacc'` และตั้ง `FIREBASE_EMULATOR_HOST = '127.0.0.1'` แล้วรัน
 ```
-npx firebase-tools emulators:start --only auth,firestore --project demo-psmacc
+npx firebase-tools emulators:start --only auth,firestore,storage --project demo-psmacc
 ```
 
 ## ทดสอบ

@@ -8,19 +8,21 @@
 //   ผู้ดู (role 'viewer')       → Viewer
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
+import { getStorage, connectStorageEmulator, ref, uploadBytes, getBytes, deleteObject } from 'firebase/storage';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit, writeBatch, arrayUnion, arrayRemove, serverTimestamp, setLogLevel } from 'firebase/firestore';
 setLogLevel('silent');
 
 const P = process.env.GCLOUD_PROJECT || 'demo-psmacc';
 const FS = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080', AU = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
 const [FS_HOST, FS_PORT] = [FS.split(':')[0], Number(FS.split(':')[1])];
+const ST = process.env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199';
 
 /* ---------------- test harness ---------------- */
 const res = []; let section = '', sectionId = '', seq = 0;
 const S = (id, title) => { sectionId = id; section = id + ' ' + title; seq = 0; };
 async function expect(name, want, fn) {
   const id = sectionId + '.' + String(++seq).padStart(2, '0');
-  let got; try { await fn(); got = 'allow'; } catch (e) { got = e.code === 'permission-denied' ? 'deny' : 'ERR:' + e.code + ':' + String(e.message).slice(0, 90); }
+  let got; try { await fn(); got = 'allow'; } catch (e) { got = e.code === 'permission-denied' || e.code === 'storage/unauthorized' ? 'deny' : 'ERR:' + e.code + ':' + String(e.message).slice(0, 90); }
   res.push({ ok: got === want, section, id, name, want, got });
 }
 function report() {
@@ -41,10 +43,11 @@ let n = 0;
 function client(name) {
   const app = initializeApp({ apiKey: 'k', projectId: P, authDomain: 'x' }, name);
   const db = getFirestore(app); connectFirestoreEmulator(db, FS_HOST, FS_PORT);
-  return { app, db };
+  const st = getStorage(app, `gs://${P}.appspot.com`); connectStorageEmulator(st, ST.split(':')[0], Number(ST.split(':')[1]));
+  return { app, db, st };
 }
 async function user(email, verified = true) {
-  const { app, db } = client('u' + (++n));
+  const { app, db, st } = client('u' + (++n));
   const auth = getAuth(app); connectAuthEmulator(auth, `http://${AU}`, { disableWarnings: true });
   const c = await createUserWithEmailAndPassword(auth, email, 'test-only-password');
   if (verified) {
@@ -53,7 +56,7 @@ async function user(email, verified = true) {
     await fetch(r.oobCodes.filter(o => o.email === email && o.requestType === 'VERIFY_EMAIL').pop().oobLink);
     await c.user.reload(); await c.user.getIdToken(true);
   }
-  return { db, uid: c.user.uid, email };
+  return { db, st, uid: c.user.uid, email };
 }
 const m = (u, co, uid) => doc(u.db, `companies/${co}/members/${uid}`);
 const coDoc = (u, co) => doc(u.db, 'companies', co);
@@ -95,7 +98,7 @@ await join(A, 'co1', E, 'editor'); await join(A, 'co1', V, 'viewer'); await join
 await join(B, 'co2', Y, 'editor');
 await setDoc(doc(A.db, 'companies/co1/documents/d1'), { t: 1 }); await setDoc(doc(A.db, 'companies/co1/settings/company'), { name: 'Company A' });
 await setDoc(doc(B.db, 'companies/co2/documents/d1'), { t: 2 }); await setDoc(doc(B.db, 'companies/co2/settings/company'), { name: 'Company B' });
-const anon = client('anon').db;
+const anonClient = client('anon'), anon = anonClient.db;
 
 S('R1', 'ผู้ใช้ที่ไม่ได้ Login ต้องอ่าน/เขียนไม่ได้');
 await expect('anonymous: read company doc', 'deny', () => getDoc(doc(anon, 'companies/co1')));
@@ -459,5 +462,30 @@ await expect('removed member rejoins with no invite left', 'deny', () => accept(
 await expect('removed member rejoins claiming to delete a missing invite', 'deny', () => accept(X, 'co1', 'viewer', 'removed', A.uid, true));
 await invite(A, 'co1', 'x@t.com', 'viewer');
 await expect('removed member rejoins with a NEW invite', 'allow', () => accept(X, 'co1', 'viewer', 'removed', A.uid, true));
+
+S('R16', 'ไฟล์แนบ (storage.rules): เฉพาะสมาชิกบริษัท อัปโหลดได้เฉพาะ Owner/User แก้/ลบไม่ได้');
+const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52]);
+const put = (u, co, id, opts = {}, data = pdf) => uploadBytes(ref(u.st, `companies/${co}/files/${id}`), data, { contentType: 'application/pdf', customMetadata: { uid: u.uid }, ...opts });
+const fileOf = (u, co, id) => getBytes(ref(u.st, `companies/${co}/files/${id}`));
+await expect('Primary Owner uploads a PDF', 'allow', () => put(A, 'co1', 'fileaaaa01'));
+await expect('User uploads an image', 'allow', () => put(E, 'co1', 'fileeeee01', { contentType: 'image/png', customMetadata: { uid: E.uid } }));
+await expect('User uploads a CSV', 'allow', () => put(E, 'co1', 'fileeeee02', { contentType: 'text/csv', customMetadata: { uid: E.uid } }));
+await expect('Viewer uploads', 'deny', () => put(V, 'co1', 'filevvvv01', { customMetadata: { uid: V.uid } }));
+await expect('anonymous uploads', 'deny', () => put({ st: anonClient.st, uid: 'x' }, 'co1', 'fileanon01'));
+await expect('owner of another company uploads into co1', 'deny', () => put(B, 'co1', 'filebbbb01', { customMetadata: { uid: B.uid } }));
+await expect('signed-in non-member uploads', 'deny', () => put(Z, 'co1', 'filezzzz01', { customMetadata: { uid: Z.uid } }));
+await expect('User uploads claiming another uploader', 'deny', () => put(E, 'co1', 'fileeeee03', { customMetadata: { uid: A.uid } }));
+await expect('User uploads an executable type', 'deny', () => put(E, 'co1', 'fileeeee04', { contentType: 'application/x-msdownload', customMetadata: { uid: E.uid } }));
+await expect('User uploads a file over 20 MB', 'deny', () => put(E, 'co1', 'fileeeee05', { customMetadata: { uid: E.uid } }, new Uint8Array(20 * 1024 * 1024 + 1)));
+await expect('User uploads with a path-like file id', 'deny', () => put(E, 'co1', 'Invoice.PDF', { customMetadata: { uid: E.uid } }));
+await expect('User overwrites an existing file', 'deny', () => put(E, 'co1', 'fileaaaa01', { customMetadata: { uid: E.uid } }));
+await expect('Primary Owner deletes a file', 'deny', () => deleteObject(ref(A.st, 'companies/co1/files/fileaaaa01')));
+await expect('Viewer reads a file', 'allow', async () => { const b = new Uint8Array(await fileOf(V, 'co1', 'fileaaaa01')); if (b.length !== pdf.length) throw new Error('size ' + b.length); });
+await expect('User reads a file', 'allow', () => fileOf(E, 'co1', 'fileeeee01'));
+await expect('anonymous reads a file', 'deny', () => fileOf({ st: anonClient.st }, 'co1', 'fileaaaa01'));
+await expect('owner of another company reads a co1 file', 'deny', () => fileOf(B, 'co1', 'fileaaaa01'));
+await expect('User of another company reads a co1 file', 'deny', () => fileOf(Y, 'co1', 'fileaaaa01'));
+await remove(A, 'co1', X, 'viewer');
+await expect('removed member reads a file', 'deny', () => fileOf(X, 'co1', 'fileaaaa01'));
 
 process.exit(report() ? 1 : 0);

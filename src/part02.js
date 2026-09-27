@@ -1055,6 +1055,14 @@ async function ensureVatAccounts() {
 /* ---- Attachments (assets capability) ---- */
 var ASSETS = null;
 if (window.claude && window.claude.use) window.claude.use('assets').then(function(a) { ASSETS = a; var m = byId('attMsg'); if (m && !a) m.textContent = 'แนบไฟล์ได้เฉพาะผู้มีสิทธิ์แก้ไข'; }).catch(function() {});
+// Claude assets in the artifact, Firebase Storage when signed in to Firebase
+async function getAssets() {
+  if (ASSETS) return ASSETS;
+  if (FB_MODE) return (ASSETS = FB_ASSETS);
+  try { ASSETS = window.claude && window.claude.use ? await window.claude.use('assets') : null; } catch (e) { ASSETS = null; }
+  return ASSETS;
+}
+function attRecord(r, f) { var a = { id: r.id, name: f.name, type: r.contentType || f.type, size: r.sizeBytes || f.size }; if (r.url) a.url = r.url; if (r.path) a.path = r.path; return a; }
 function attUrl(a) { return a.url || ('/_blob/' + a.id); }
 function attIcon(a) { return /^image\//.test(a.type || '') ? '🖼' : /pdf/.test(a.type || '') ? '📄' : '📎'; }
 function attLinksHTML(list) {
@@ -1070,13 +1078,13 @@ function renderAttList() {
 document.addEventListener('change', async function(e) {
   if (!e.target || e.target.id !== 'attInput') return;
   var inp = e.target, msg = byId('attMsg'), files = Array.from(inp.files || []);
-  if (!ASSETS) ASSETS = window.claude && window.claude.use ? await window.claude.use('assets') : null;
+  await getAssets();
   if (!ASSETS) { if (msg) msg.textContent = 'ไม่สามารถแนบไฟล์ในมุมมองนี้ได้'; inp.value = ''; return; }
   for (var k = 0; k < files.length; k++) {
     var f = files[k];
     if (msg) msg.textContent = 'กำลังอัปโหลด ' + f.name + ' …';
-    try { var r = await ASSETS.upload(f); form.attachments.push({ id: r.id, url: r.url, name: f.name, type: r.contentType || f.type, size: r.sizeBytes || f.size }); renderAttList(); if (msg) msg.textContent = 'อัปโหลดแล้ว — กดบันทึกเอกสารเพื่อเก็บไฟล์แนบ'; }
-    catch (err) { if (msg) msg.textContent = 'อัปโหลด ' + f.name + ' ไม่สำเร็จ: ' + ({ too_large:'ไฟล์ใหญ่เกินไป', unsupported_type:'ไม่รองรับชนิดไฟล์นี้', quota_or_state:'พื้นที่เก็บไฟล์เต็ม', not_granted:'ไม่ได้รับอนุญาต' }[err && err.code] || (err && err.message) || 'ข้อผิดพลาด'); }
+    try { var r = await ASSETS.upload(f); form.attachments.push(attRecord(r, f)); renderAttList(); if (msg) msg.textContent = 'อัปโหลดแล้ว — กดบันทึกเอกสารเพื่อเก็บไฟล์แนบ'; }
+    catch (err) { if (msg) msg.textContent = 'อัปโหลด ' + f.name + ' ไม่สำเร็จ: ' + ({ too_large:'ไฟล์ใหญ่เกินไป', unsupported_type:'ไม่รองรับชนิดไฟล์นี้', quota_or_state:'พื้นที่เก็บไฟล์เต็ม', not_granted:'ไม่ได้รับอนุญาต', storage_off:'ยังไม่ได้เปิดใช้ Firebase Storage หรือเชื่อมต่อไม่ได้', no_bucket:'ยังไม่ได้ตั้งค่า storageBucket' }[err && err.code] || (err && err.message) || 'ข้อผิดพลาด'); }
   }
   inp.value = '';
 });
@@ -1086,6 +1094,7 @@ document.addEventListener('click', function(e) {
   e.preventDefault(); try { openAttachment(JSON.parse(el.dataset.attopen)); } catch (err) {}
 }, true);
 async function attBlob(a) {
+  if (a.path) { var fr = await fetch(await fbFileUrl(a)); if (!fr.ok) throw new Error('HTTP ' + fr.status); return await fr.blob(); }
   var r = await fetch(attUrl(a), { credentials: 'include' });
   if (!r.ok) r = await fetch('/_blob/' + a.id, { credentials: 'include' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1101,19 +1110,25 @@ async function openAttachment(a) {
   ov.addEventListener('click', async function(ev) {
     if (ev.target === ov || (ev.target.dataset && ev.target.dataset.av === 'close')) return close();
     if (ev.target.dataset && ev.target.dataset.av === 'dl') {
-      try { var dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; var b = blob || await attBlob(a);
-        if (dl) await dl.save({ filename: a.name, data: b }); else { var u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = a.name; x.click(); setTimeout(function() { URL.revokeObjectURL(u); }, 5000); }
+      try { var dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; var b = blob || await attBlob(a).catch(function(e) { if (a.path) return null; throw e; });
+        if (dl) await dl.save({ filename: a.name, data: b });
+        else if (!b) window.open(await fbFileUrl(a), '_blank', 'noopener'); else { var u = URL.createObjectURL(b), x = document.createElement('a'); x.href = u; x.download = a.name; x.click(); setTimeout(function() { URL.revokeObjectURL(u); }, 5000); }
       } catch (err) { body.insertAdjacentHTML('afterbegin', '<div class="muted">ดาวน์โหลดไม่สำเร็จ</div>'); }
     }
   });
   var body = ov.querySelector('.att-vbody');
   try {
+    // Storage files: images load straight from their URL; other files are fetched (needs CORS on the bucket)
+    if (a.path && /^image\//.test(a.type || '')) { body.innerHTML = '<img src="' + esc(await fbFileUrl(a)) + '" alt="' + esc(a.name) + '">'; return; }
     blob = await attBlob(a); obj = URL.createObjectURL(blob);
     var t = blob.type || a.type || '';
     if (/^image\//.test(t)) body.innerHTML = '<img src="' + obj + '" alt="' + esc(a.name) + '">';
     else if (/pdf/.test(t) || /\.pdf$/i.test(a.name)) await renderPdfInto(body, blob);
     else { var txt = await blob.text(); body.innerHTML = '<pre></pre>'; body.firstChild.textContent = txt.slice(0, 200000); }
-  } catch (err) { body.innerHTML = '<div class="muted">เปิดไฟล์ไม่ได้ (' + esc(err.message || '') + ') ลองกดดาวน์โหลด</div>'; }
+  } catch (err) {
+    body.innerHTML = '<div class="muted">เปิดไฟล์ไม่ได้ (' + esc(err.message || err.code || '') + ') ลองกดดาวน์โหลด</div>';
+    if (a.path) fbFileUrl(a).then(function(u) { body.insertAdjacentHTML('beforeend', '<p><a href="' + esc(u) + '" target="_blank" rel="noopener">เปิดไฟล์ในแท็บใหม่</a></p>'); }, function() {});
+  }
 }
 
 var PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';

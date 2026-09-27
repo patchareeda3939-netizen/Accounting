@@ -1,0 +1,26 @@
+rules_version = '2';
+// ไฟล์แนบของเอกสาร: companies/{co}/files/{id}
+//   อ่านได้เฉพาะสมาชิกของบริษัทนั้น (เจ้าของ/ผู้แก้ไข/ผู้ดู)
+//   อัปโหลดได้เฉพาะเจ้าของและผู้แก้ไข: รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB
+//   แก้ไขหรือลบไฟล์ไม่ได้ (เก็บเป็นหลักฐานทางบัญชี)
+// สิทธิ์อ่านจาก Firestore (companies/{co}/members/{uid}) เดียวกับ firestore.rules
+service firebase.storage {
+  match /b/{bucket}/o {
+    function memberDoc(co) { return /databases/(default)/documents/companies/$(co)/members/$(request.auth.uid); }
+    function isMember(co) {
+      return request.auth != null && firestore.exists(memberDoc(co))
+        && firestore.get(memberDoc(co)).data.role in ['owner', 'editor', 'viewer'];
+    }
+    function canEdit(co) { return isMember(co) && firestore.get(memberDoc(co)).data.role in ['owner', 'editor']; }
+
+    match /companies/{co}/files/{id} {
+      allow read: if isMember(co);
+      allow create: if canEdit(co) && resource == null
+        && id.matches('^[a-z0-9]{8,40}$')
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/[a-z0-9.+-]+|application/pdf|application/json|text/(plain|csv|markdown)')
+        && request.resource.metadata.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

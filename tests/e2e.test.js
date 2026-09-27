@@ -261,6 +261,33 @@ async function verify(email) {
   ok('new primary sees transfer buttons', (await e.$$('[data-mbxfer]')).length >= 1);
   await e.evaluate(() => closeModal());
 
+  // ---- attachments in Firebase mode (Firebase Storage + storage.rules)
+  const attDir = path.join(TMP, 'att'); fs.mkdirSync(attDir, { recursive: true });
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  fs.writeFileSync(path.join(attDir, 'ใบเสร็จ.png'), PNG); fs.writeFileSync(path.join(attDir, 'note.txt'), 'หลักฐานการจ่าย 123');
+  await e.evaluate(() => { closeModal(); openDocForm('expense'); }); await e.fill('#f_party', 'ร้านแนบไฟล์'); await e.fill('#f_amount', '250');
+  await e.setInputFiles('#attInput', [path.join(attDir, 'ใบเสร็จ.png'), path.join(attDir, 'note.txt')]);
+  await e.waitForFunction(() => form && form.attachments.length === 2, null, { timeout: 15000 }).catch(() => {});
+  ok('attachments upload to Firebase Storage from the document form', await e.evaluate(() => form.attachments.length === 2 && form.attachments.every(a => /^companies\/[^/]+\/files\/[a-z0-9]+$/.test(a.path) && a.path.indexOf(CUR_CO) > 0)), await e.evaluate(() => [form.attachments, byId('attMsg').textContent]));
+  await e.evaluate(() => [...byId('modalFoot').querySelectorAll('button')].pop().click()); await e.waitForTimeout(1500);
+  const attDoc = await e.evaluate(() => { const d = STORE.documents.find(x => x.party === 'ร้านแนบไฟล์'); return d && { id: d._id, att: d.extra.attachments }; });
+  ok('document saved with attachment references', attDoc && attDoc.att.length === 2 && attDoc.att[0].name === 'ใบเสร็จ.png' && attDoc.att[0].type === 'image/png' && attDoc.att[1].type === 'text/plain', [attDoc, await e.evaluate(() => byId('formError') && byId('formError').textContent)]);
+  await o.waitForFunction(id => STORE.documents.some(d => d._id === id), attDoc && attDoc.id, { timeout: 8000 }).catch(() => {}); await o.evaluate(id => { closeModal(); openDocDetail(id); }, attDoc && attDoc.id); await o.waitForTimeout(800);
+  ok('another member sees the attachments on the document', (await o.$$eval('#modalBody [data-attopen]', as => as.map(a => a.textContent))).join('|').includes('note.txt'));
+  await o.click('#modalBody [data-attopen]:has-text("note.txt")'); await o.waitForSelector('.att-viewer pre', { timeout: 10000 }).catch(() => {});
+  ok('text attachment opens in the viewer', (await o.textContent('.att-viewer .att-vbody').catch(() => '')) === 'หลักฐานการจ่าย 123', await o.textContent('.att-viewer .att-vbody').catch(() => ''));
+  await o.click('.att-viewer [data-av="close"]');
+  await o.click('#modalBody [data-attopen]:has-text("ใบเสร็จ.png")'); await o.waitForSelector('.att-viewer img', { timeout: 10000 }).catch(() => {});
+  ok('image attachment opens in the viewer', await o.evaluate(() => { const i = document.querySelector('.att-viewer img'); return !!i && i.complete && i.naturalWidth === 1; }));
+  await o.click('.att-viewer [data-av="close"]'); await o.evaluate(() => closeModal());
+  const vUp = await v.evaluate(async p => { try { await (await fbStorage()).ref(p).getDownloadURL(); return 'ok'; } catch (x) { return x.code; } }, attDoc && attDoc.att[1].path);
+  ok('removed member cannot read the attachment', vUp === 'storage/unauthorized', vUp);
+  const sAtt = await s.evaluate(async p => { try { await (await fbStorage()).ref(p).getDownloadURL(); return 'ok'; } catch (x) { return x.code; } }, attDoc && attDoc.att[1].path);
+  ok('member of another company cannot read the attachment', sAtt === 'storage/unauthorized', sAtt);
+  const eBig = await e.evaluate(async () => { try { await FB_ASSETS.upload({ name: 'big.pdf', type: 'application/pdf', size: 21 * 1024 * 1024 }); return 'ok'; } catch (x) { return x.code; } });
+  const eExe = await e.evaluate(async () => { try { await FB_ASSETS.upload(new File(['MZ'], 'x.exe', { type: 'application/x-msdownload' })); return 'ok'; } catch (x) { return x.code; } });
+  ok('file size and type limits checked before upload', eBig === 'too_large' && eExe === 'unsupported_type', [eBig, eExe]);
+
   // ---- backup: reminder when never backed up, file downloads, time of last backup saved
   await o.keyboard.press('Escape'); await o.evaluate(() => { closeModal(); renderDashboard(); });
   ok('backup reminder shown when company was never backed up', /ยังไม่เคยสำรองข้อมูล/.test(await o.textContent('#backupNag')), await o.textContent('#backupNag'));
