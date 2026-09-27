@@ -97,6 +97,7 @@ function renderDashboard() {
   byId('glanceGrid').innerHTML = cards.map(function(c) {
     return '<div class="glance-card clickable" tabindex="0" role="button" data-go="' + c.go + '"><div class="glance-label">' + c.label + '</div><div class="glance-value' + (c.neg ? ' neg' : '') + '">' + c.value + '</div><div class="glance-sub">' + c.sub + '</div></div>';
   }).join('');
+  renderBackupNag();
   var body = byId('recentBody');
   if (!docs.length) {
     body.innerHTML = '<tr><td colspan="6" class="empty-hint">' + (dbReady ? 'ยังไม่มีเอกสาร เริ่มสร้างจาก "สร้างการดำเนินการ" ด้านบน' : 'กำลังโหลดข้อมูล…') + '</td></tr>';

@@ -217,6 +217,7 @@
   .banner { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; }
   .banner.ok { background: var(--good-soft); color: var(--good); }
   .banner.bad { background: var(--danger-soft); color: var(--danger); }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); }
   .banner.info { background: var(--bg-accent-soft); color: var(--accent-strong); }
 
   /* Chart */
@@ -2386,6 +2387,7 @@ function renderDashboard() {
   byId('glanceGrid').innerHTML = cards.map(function(c) {
     return '<div class="glance-card clickable" tabindex="0" role="button" data-go="' + c.go + '"><div class="glance-label">' + c.label + '</div><div class="glance-value' + (c.neg ? ' neg' : '') + '">' + c.value + '</div><div class="glance-sub">' + c.sub + '</div></div>';
   }).join('');
+  renderBackupNag();
   var body = byId('recentBody');
   if (!docs.length) {
     body.innerHTML = '<tr><td colspan="6" class="empty-hint">' + (dbReady ? 'ยังไม่มีเอกสาร เริ่มสร้างจาก "สร้างการดำเนินการ" ด้านบน' : 'กำลังโหลดข้อมูล…') + '</td></tr>';
@@ -4704,29 +4706,61 @@ function openImportHub() {
 }
 // branches first: restored documents may refer to them
 var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
+function saveFileLocally(filename, text, type) {
+  var a = document.createElement('a'), url = URL.createObjectURL(new Blob([text], { type: type || 'application/json' }));
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+function lastBackup() { return (STORE.settings.find(function(s) { return s._id === 'backup'; }) || {}).lastAt || 0; }
 async function backupData() {
-  var data = { app:'PSMacc', company: companyName(), exportedAt: new Date().toISOString() };
+  var data = { app:'PSMacc', version: 2, company: companyName(), companyId: CUR_CO, exportedAt: new Date().toISOString(), exportedBy: (typeof fbEmail === 'function' && FB_MODE) ? fbEmail() : '' };
   BACKUP_COLLS.forEach(function(c) { data[c] = STORE[c]; });
-  var json = JSON.stringify(data, null, 1), dl = await getDownloads();
-  if (!dl) { openModal({ title:'สำรองข้อมูลบริษัท', focus:false, body:'<div class="banner info">หน้านี้บันทึกไฟล์ลงเครื่องไม่ได้ในมุมมองนี้ คัดลอกข้อความด้านล่างเก็บไว้แทนได้</div><textarea class="imp-text" rows="10" readonly>' + esc(json) + '</textarea>', buttons:[{ label:'ปิด', onClick: closeModal }] }); return; }
-  try { await dl.save({ filename: 'backup-' + companyName() + '-' + todayStr() + '.json', data: json }); showToast('สำรองข้อมูลแล้ว'); } catch (e) { if (!e || e.code !== 'declined') showToast('สำรองข้อมูลไม่สำเร็จ'); }
+  var json = JSON.stringify(data, null, 1), filename = 'backup-' + companyName().replace(/[\\/:*?"<>|]/g, '_') + '-' + todayStr() + '.json', dl = await getDownloads();
+  try {
+    if (dl) await dl.save({ filename: filename, data: json });
+    else saveFileLocally(filename, json); // GitHub Pages / normal browser
+  } catch (e) { if (!e || e.code !== 'declined') showToast('สำรองข้อมูลไม่สำเร็จ'); return; }
+  showToast('ดาวน์โหลดไฟล์สำรองข้อมูลแล้ว');
+  // remember when the last backup was taken (viewers cannot write; ignore)
+  saveSettings('backup', { lastAt: Date.now(), by: data.exportedBy || '' }).then(function() { renderBackupNag(); }, function() {});
+}
+// reminder on the home page when the company has data but no backup in the last 7 days
+function renderBackupNag() {
+  var host = byId('backupNag');
+  if (!host) { var head = document.querySelector('.home-head'); if (!head) return; host = document.createElement('div'); host.id = 'backupNag'; head.parentNode.insertBefore(host, head.nextSibling); }
+  var last = lastBackup(), days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  var show = STORE.documents.length > 0 && !fbReadOnly() && (days === null || days >= 7);
+  host.innerHTML = show ? '<div class="banner warn" style="margin:12px 0 0">' + (days === null ? 'ยังไม่เคยสำรองข้อมูลบริษัทนี้' : 'สำรองข้อมูลล่าสุดเมื่อ ' + days + ' วันก่อน') +
+    ' <button type="button" class="linkish" id="backupNow">ดาวน์โหลดไฟล์สำรองข้อมูลตอนนี้</button></div>' : '';
+  var b = byId('backupNow'); if (b) b.onclick = backupData;
 }
 function openRestore() {
   openModal({ title:'กู้คืนจากไฟล์สำรองข้อมูล', body:'<p class="small muted" style="margin:0">เพิ่มรายการจากไฟล์สำรองเข้าไปในข้อมูลปัจจุบัน รายการที่มีรหัสเดียวกันจะถูกเขียนทับ</p><div class="field"><label for="rsFile">ไฟล์ .json</label><input id="rsFile" type="file" accept=".json,application/json"></div><div id="rsInfo"></div><div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'กู้คืน', cls:'btn-dark', onClick: function(b) {
       var data = openRestore._data; if (!data) { var e = byId('formError'); e.textContent = 'เลือกไฟล์สำรองข้อมูลก่อน'; e.hidden = false; return; }
       runSave(b, async function() {
-        var n = 0;
+        var n = 0, failed = 0;
         for (var ci = 0; ci < BACKUP_COLLS.length; ci++) {
           var c = BACKUP_COLLS[ci], list = Array.isArray(data[c]) ? data[c] : [];
           for (var i = 0; i < list.length; i++) {
-            var rec = list[i], id = rec._id;
-            if (db && id && /^[A-Za-z0-9_\-.~:@+]+$/.test(id)) await db.doc(cname(c) + '/' + id).set(strip(rec));
-            else await addRec(c, strip(rec));
-            n++; b.textContent = 'กำลังกู้คืน ' + n;
+            var rec = strip(list[i]), id = list[i]._id;
+            // the period lock is never restored from a file (changing it needs an audited lock/unlock)
+            if (c === 'settings' && id === 'company') {
+              delete rec.lockDate; delete rec.lockAuditId; delete rec.branches;
+              // legal identity (name, tax ID, ...) stays as is when restoring into another company or without the right to change it
+              if (!canEditLegal() || (data.companyId && data.companyId !== CUR_CO)) LEGAL_FIELDS.forEach(function(k) { delete rec[k]; });
+            }
+            if (c === 'settings' && id === 'backup') continue;
+            try {
+              if (db && id && /^[A-Za-z0-9_\-.~:@+]+$/.test(id)) { if (FB_MODE && c === 'settings') await fbSaveSettings(id, rec); else await setRec(c, id, rec); }
+              else if (c === 'branches') await putBranch(rec);
+              else await addRec(c, rec);
+              n++;
+            } catch (e) { failed++; console.warn('restore skipped', c, id, e && e.code); } // e.g. transaction in a locked period, or no permission
+            b.textContent = 'กำลังกู้คืน ' + (n + failed);
           }
         }
-        showToast('กู้คืน ' + n + ' รายการแล้ว'); closeModal();
+        showToast('กู้คืน ' + n + ' รายการแล้ว' + (failed ? ' · ข้าม ' + failed + ' รายการที่บันทึกไม่ได้ (ไม่มีสิทธิ์หรืออยู่ในงวดที่ล็อก)' : '')); closeModal();
       });
     } }], onMount: function() {
       openRestore._data = null;
