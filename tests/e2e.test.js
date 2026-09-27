@@ -51,6 +51,7 @@ async function verify(email) {
   await o.fill('#auCo', 'บริษัท เจ้าของ จำกัด'); await o.fill('#auTax', '0105555000001'); await o.click('#authSubmit');
   await o.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await o.waitForTimeout(4000);
   const os = await o.evaluate(() => ({ mode: FB_MODE, role: CUR_ROLE, name: companyName(), accts: STORE.accounts.length, cos: coList().map(c => c.name), pill: byId('companyPill').textContent, av: document.querySelector('.topbar .avatar').textContent }));
+  ok('home greeting shows the signed-in user\'s email', await o.textContent('#homeGreeting') === 'สวัสดี owner@x.com !', await o.textContent('#homeGreeting'));
   ok('owner logged in, company created, COA seeded', os.mode && os.role === 'owner' && os.name === 'บริษัท เจ้าของ จำกัด' && os.accts >= 27, os);
   // write a document with nested arrays (Firestore can't store these natively)
   await o.evaluate(async () => { await addRec('documents', { type: 'invoice', docNo: 'INV-T1', party: 'A', date: '2026-09-10', items: [{ name: 'x', qty: 1, price: 100 }], total: 100, net: 100, grid: [[1, 2], [3, [4]]], blank: { '': 'e' }, u: undefined, createdAt: Date.now() }); });

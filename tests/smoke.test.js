@@ -63,6 +63,7 @@ async function createAndSwitch(p, label) {
   // ---- localStorage mode
   const p = await open(browser, 'local.html');
   check('local: runs without a database', await p.evaluate(() => !db && !byId('modeBadge').hidden));
+  check('local: greeting has no hard-coded name', (await p.textContent('#homeGreeting')).trim() === 'สวัสดี');
   await visitAllPages(p, 'local');
   await createAndSwitch(p, 'local');
   check('local: no page errors', p.errs.length === 0, p.errs);
