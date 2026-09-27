@@ -100,6 +100,25 @@ async function verify(email) {
   await v.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await v.waitForTimeout(2500);
   const vs = await v.evaluate(() => ({ role: CUR_ROLE, docs: STORE.documents.length, badge: !byId('roleBadge').hidden }));
   ok('viewer joined, sees data, badge shown', vs.role === 'viewer' && vs.docs === 1 && vs.badge, vs);
+  // viewer: no create/edit/delete controls anywhere in the app
+  const visibleWrites = pg => pg.evaluate(() => [...document.querySelectorAll('button, [role="button"], [role="menuitem"]')]
+    .filter(el => el.offsetParent !== null && !el.closest('#authScreen') && el.id !== 'accNameSave' && RO_TEXT.test(el.textContent || ''))
+    .map(el => (el.textContent || '').trim().slice(0, 30)));
+  const vSweep = await v.evaluate(async () => {
+    const found = new Set(), wait = ms => new Promise(r => setTimeout(r, ms));
+    const collect = where => document.querySelectorAll('button, [role="button"], [role="menuitem"]').forEach(el => { if (el.offsetParent !== null && !el.closest('#authScreen') && el.id !== 'accNameSave' && (RO_TEXT.test(el.textContent || '') || el.matches(RO_SEL))) found.add(where + ': ' + (el.textContent || '').trim().slice(0, 30)); });
+    for (const id of [...document.querySelectorAll('.side-item')].map(e => e.id).filter(Boolean)) { const el = byId(id); if (el && el.offsetParent !== null) { el.click(); await wait(150); collect(id); closeModal && closeModal(); } }
+    for (const k of [...document.querySelectorAll('.subnav-child')].map(e => e.dataset.childKey)) { const el = document.querySelector('.subnav-child[data-child-key="' + k + '"]'); if (el) { el.click(); await wait(80); collect(k); } }
+    const d = STORE.documents[0]; if (d) { openDocDetail(d._id); await wait(300); collect('doc detail'); closeModal(); }
+    return [...found]; });
+  ok('viewer: no visible create/edit/delete control on any page or document view', vSweep.length === 0, vSweep.slice(0, 10));
+  ok('viewer: create button and quick actions hidden', await v.evaluate(() => byId('sidebarCreateBtn').offsetParent === null && document.querySelector('.quick-row').offsetParent === null));
+  await v.evaluate(() => { go('accounting', 'monthClose'); }); await v.waitForTimeout(400);
+  ok('viewer: month-close checklist inputs disabled', await v.evaluate(() => [...document.querySelectorAll('[data-mcdone]')].every(el => el.disabled)));
+  await v.evaluate(() => fbOpenAccount(true)); await v.waitForTimeout(300);
+  ok('viewer: can still set own display name', await v.evaluate(() => byId('accNameSave').offsetParent !== null));
+  await v.evaluate(() => closeModal());
+  ok('editor: create button and quick actions still visible', await e.evaluate(() => { go('home'); return byId('sidebarCreateBtn').offsetParent !== null; }) && (await visibleWrites(e)).length > 0);
   const vw = await v.evaluate(async () => { try { await addRec('contacts', { name: 'V' }); return 'ok'; } catch (x) { return writeError(x); } });
   ok('viewer write blocked with Thai message', /ดูอย่างเดียว/.test(vw), vw);
   await v.evaluate(() => go('settings', 'company')); await v.waitForTimeout(800);

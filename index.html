@@ -582,6 +582,7 @@
 .auth-submit{width:100%;justify-content:center;padding:10px}
 .auth-links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--text-secondary)}
 .auth-invite{display:block;margin:0;line-height:1.7}
+.ro-hide{display:none!important}
 </style>
 
 <div class="app">
@@ -814,7 +815,7 @@ async function fbStart() {
   if (!cos.some(function(c) { return c._id === CUR_CO; })) CUR_CO = cos[0]._id;
   try { localStorage.setItem('psm_company', CUR_CO); } catch (e) {}
   COMPANIES = cos; FB_MODE = true;
-  authHide(); fbAvatar(); fbWatchRole();
+  authHide(); fbAvatar(); roWatch(); fbWatchRole();
   if (joined.length) setTimeout(function() { showToast('เข้าร่วมบริษัท ' + joined.join(', ') + ' แล้ว'); }, 600);
   return fbDb(fs, user.uid);
 }
@@ -877,10 +878,33 @@ function fbWatchRole() {
     if (changed && byId('sectionView') && !byId('sectionView').hidden) refreshPageData(); // edit controls depend on the role
   }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
+/* ---- Viewer: hide create/edit/delete controls everywhere (firestore.rules block the writes anyway) ---- */
+var RO_TEXT = /^\s*(\+|สร้าง|เพิ่ม|บันทึก|แก้ไข|ลบ|ยกเลิกเอกสาร|ยกเลิกคู่|กู้คืน|รับชำระ|จ่ายชำระ|ถอน|ฝาก|ปรับ|นำเข้า|ล้าง|ล็อก|ปลดล็อก|ทำเครื่องหมาย|ย้อน|เริ่มกระทบยอด|กระทบยอดใหม่|จับคู่|ทำต่อ|โครงการใหม่|ทำซ้ำ|คัดลอกเป็น|แปลงเป็น|อนุมัติ|ปิด Statement|เสร็จ)/;
+var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
+var RO_KEEP = '#authScreen *, #accNameSave';
+var RO_DISABLE = '[data-mcdone], [data-mcnote], [data-ocr], [data-ocri]';
+function roApply() {
+  var on = fbReadOnly();
+  document.body.classList.toggle('read-only', on);
+  if (!on) {
+    document.querySelectorAll('.ro-hide').forEach(function(el) { el.classList.remove('ro-hide'); });
+    document.querySelectorAll('[data-ro-dis]').forEach(function(el) { el.disabled = false; delete el.dataset.roDis; });
+    return;
+  }
+  document.querySelectorAll('button, [role="button"], [role="menuitem"], ' + RO_SEL).forEach(function(el) {
+    if (el.matches(RO_KEEP)) return;
+    if (el.matches(RO_SEL) || RO_TEXT.test(el.textContent || '')) el.classList.add('ro-hide');
+  });
+  document.querySelectorAll(RO_DISABLE).forEach(function(el) { if (!el.disabled) { el.disabled = true; el.dataset.roDis = '1'; } });
+}
+var _roObs = null;
+// re-apply whenever anything is rendered (runs before paint, so write buttons never flash)
+function roWatch() { if (_roObs) return; _roObs = new MutationObserver(roApply); _roObs.observe(document.body, { childList: true, subtree: true }); }
 function fbRoleBadge() {
   var el = byId('roleBadge');
   if (!el) { var mb = byId('modeBadge'); if (!mb) return; el = document.createElement('span'); el.id = 'roleBadge'; el.className = 'mode-badge'; mb.parentNode.insertBefore(el, mb); }
   el.hidden = !fbReadOnly(); el.textContent = 'สิทธิ์ดูอย่างเดียว';
+  roApply();
 }
 function fbAvatar() {
   var av = document.querySelector('.topbar .avatar'); if (!av) return;
