@@ -71,6 +71,19 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   require('child_process').execFileSync('bash', ['build.sh'], { cwd: bdir, stdio: 'ignore' });
   check('build.sh refreshes root index.html from src/', fs.readFileSync(path.join(bdir, 'index.html'), 'utf8').includes('REG07_MARKER'));
 
+  REG('MIG-01', 'ย้ายสาขาจากรูปแบบเดิม (settings.branches) เป็นรายการสาขาแยก โดยข้อมูลไม่หาย');
+  for (const [mode, url] of [['browser storage', pages.local], ['Claude DB', pages.claudedb]]) {
+    const q = await L.newPage(browser, url);
+    await q.evaluate(async () => { await addRec('documents', { type: 'invoice', docNo: 'MIG-1', party: 'A', date: '2026-09-01', items: [], total: 0, net: 0, extra: { branch: '00001' }, createdAt: Date.now() });
+      await saveSettings('company', { branches: [{ code: '00001', name: 'สาขาเดิม 1', address: 'เชียงใหม่', phone: '053' }, { code: '00002', name: 'สาขาเดิม 2', address: 'ขอนแก่น', phone: '' }] }); });
+    await q.waitForTimeout(1500);
+    const r = await q.evaluate(() => ({ br: STORE.branches.map(b => [b.code, b.name, b.address, b.used, b.active].join('|')).sort(), legacy: companySettings().branches, label: branchLabel(branchOf('00001')) }));
+    check(mode + ': old branches moved with name/address and history flag', JSON.stringify(r.br) === JSON.stringify(['00001|สาขาเดิม 1|เชียงใหม่|true|true', '00002|สาขาเดิม 2|ขอนแก่น|false|true']), r);
+    check(mode + ': old list cleared so migration runs once', r.legacy == null, r.legacy);
+    check(mode + ': documents still show their branch', r.label === 'สาขาที่ 00001 สาขาเดิม 1', r.label);
+    check(mode + ': no page errors', q.errs.length === 0, q.errs);
+  }
+
   /* ---------- Firebase (Emulator) ---------- */
   await L.resetEmulators();
   const app = await L.startFirebaseApp();
@@ -131,6 +144,17 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   await o.fill('#mbEmail', 'pending@reg.test'); await o.selectOption('#mbRole', 'editor'); await o.click('#mbInvite'); await o.waitForTimeout(500);
   const msg = await o.textContent('#formError');
   check('duplicate invite shows "pending invite" message', /มีคำเชิญค้างอยู่แล้ว/.test(msg) && !/ไม่มีสิทธิ์/.test(msg), msg);
+
+  REG('REG-14', 'บันทึกการตั้งค่าส่งค่าที่ถูกปฏิเสธไปแล้วซ้ำ ทำให้บันทึกครั้งถัดไปล้มเหลว');
+  await o.evaluate(() => closeModal()); await inviteByUi(o, 'acct@reg.test', 'editor');
+  const ac = await open(); await joinByUi(ac, 'acct@reg.test');
+  const r14 = await ac.evaluate(async () => {
+    const out = {};
+    try { await saveSettings('company', { taxId: '0105550000015' }); out.tax = 'ok'; } catch (e) { out.tax = e.code; }
+    try { await saveSettings('company', { phone: '02-555-0000' }); out.phone = 'ok'; } catch (e) { out.phone = e.code; }
+    await new Promise(r => setTimeout(r, 800)); out.saved = companySettings().phone; return out; });
+  check('rejected legal change does not block the next save of other fields', r14.tax === 'permission-denied' && r14.phone === 'ok' && r14.saved === '02-555-0000', r14);
+  check('no page errors: accounting user', ac.errs.length === 0, ac.errs);
 
   REG('REG-12', 'Firestore บันทึกข้อมูลที่มี array ซ้อน / ค่า undefined / key ว่าง ไม่ได้');
   await o.evaluate(() => closeModal());

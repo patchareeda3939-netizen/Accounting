@@ -70,7 +70,8 @@ function closeChecks(ym) {
   push({ id:'pl', group:'ตรวจทานและปิดงวด', title:'วิเคราะห์งบกำไรขาดทุนเทียบเดือนก่อน', how:'ดูรายได้/ค่าใช้จ่ายที่เปลี่ยนแปลงผิดปกติ หาสาเหตุ และแก้ไขรายการที่ลงผิด', status:'manual', detail:'ตรวจด้วยตนเอง', action:['งบกำไรขาดทุน', "pageState.repPeriod='custom';pageState.pFrom='" + start + "';pageState.pTo='" + end + "';openReport('pl')"] });
   push({ id:'bs', group:'ตรวจทานและปิดงวด', title:'ทบทวนงบดุล ทุกบัญชีมีเอกสารประกอบยอด', how:'ทุกบัญชีสินทรัพย์/หนี้สินควรมีรายละเอียดรองรับ (ใบแจ้งยอด, ทะเบียน, รายงานอายุ)', status:'manual', detail:'ตรวจด้วยตนเอง', action:['งบดุล', "pageState.repPeriod='custom';pageState.pFrom='0000-01-01';pageState.pTo='" + end + "';openReport('bs')"] });
   var locked = lockDate() >= end;
-  push({ id:'lock', group:'ตรวจทานและปิดงวด', title:'ปิดงวด (ล็อกข้อมูลถึงสิ้นเดือน)', how:'เมื่อทุกข้อเรียบร้อย ล็อกงวดเพื่อป้องกันการแก้ไขหรือเพิ่มรายการย้อนหลัง', status: locked ? 'ok' : 'bad', detail: lockDate() ? 'ล็อกถึง ' + fmtDateNum(lockDate()) : 'ยังไม่ได้ล็อกงวด', action: locked ? ['ปลดล็อก', 'unlockPeriod()'] : ['ล็อกงวดนี้', "lockPeriod('" + end + "')"] });
+  push({ id:'lock', group:'ตรวจทานและปิดงวด', title:'ปิดงวด (ล็อกข้อมูลถึงสิ้นเดือน)', how:'เมื่อทุกข้อเรียบร้อย ล็อกงวดเพื่อป้องกันการแก้ไขหรือเพิ่มรายการย้อนหลัง', status: locked ? 'ok' : 'bad', detail: lockDate() ? 'ล็อกถึง ' + fmtDateNum(lockDate()) : 'ยังไม่ได้ล็อกงวด', action: locked ? (canEditLegal() ? ['ปลดล็อก', 'unlockPeriod()'] : null) : ['ล็อกงวดนี้', "lockPeriod('" + end + "')"] });
+  if (locked && !canEditLegal()) out[out.length - 1].detail += ' · ปลดล็อกได้เฉพาะเจ้าของบริษัท';
   return out;
 }
 var MC_ST = { ok:['✓','เรียบร้อย','mc-ok'], warn:['!','ควรตรวจ','mc-warn'], bad:['✕','ต้องทำ','mc-bad'], manual:['○','ตรวจเอง','mc-man'] };
@@ -106,5 +107,17 @@ function bindMonthClose() {
   c.querySelectorAll('[data-mcopen]').forEach(function(el) { el.addEventListener('toggle', function() { mc.open[el.dataset.mcopen] = el.open; }); });
   c.querySelectorAll('[data-mcnote]').forEach(function(inp) { inp.onchange = async function() { var n = Object.assign({}, closeDoc(mc.ym).notes || {}); n[inp.dataset.mcnote] = inp.value.trim(); await saveSettings('close_' + mc.ym, { notes: n }); }; });
 }
-async function lockPeriod(end) { await saveSettings('company', { lockDate: end }); showToast('ล็อกงวดถึง ' + fmtDateNum(end) + ' แล้ว'); refreshPageData(); }
-async function unlockPeriod() { var ps = STORE.settings.filter(function(s) { return /^close_/.test(s._id); }); await saveSettings('company', { lockDate: '' }); showToast('ปลดล็อกงวดแล้ว'); refreshPageData(); }
+// ผู้แก้ไขล็อกงวดได้ ปลดล็อกได้เฉพาะเจ้าของ; โหมด Firebase บันทึก audit ทุกครั้ง (บังคับใน firestore.rules)
+async function setLockDate(to, action) {
+  if (FB_MODE) return fbSetLockDate(to, action);
+  await saveSettings('company', { lockDate: to });
+}
+async function lockPeriod(end) {
+  try { await setLockDate(end, 'period_lock'); showToast('ล็อกงวดถึง ' + fmtDateNum(end) + ' แล้ว'); } catch (e) { showToast(writeError(e)); }
+  refreshPageData();
+}
+async function unlockPeriod() {
+  if (!canEditLegal()) { showToast('ปลดล็อกงวดได้เฉพาะเจ้าของบริษัท'); return; }
+  try { await setLockDate('', 'period_unlock'); showToast('ปลดล็อกงวดแล้ว'); } catch (e) { showToast(writeError(e)); }
+  refreshPageData();
+}

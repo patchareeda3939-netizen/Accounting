@@ -10,6 +10,9 @@ function applyCompany() {
 async function saveSettings(id, patch) {
   var cur = STORE.settings.find(function(s) { return s._id === id; });
   var rec = Object.assign({}, cur ? strip(cur) : {}, patch, { updatedAt: Date.now() });
+  // Firebase: write only the changed fields, so stale or rejected cached values are never re-sent
+  // and concurrent edits by other users to other fields are kept
+  if (FB_MODE) { await fbSaveSettings(id, Object.assign({}, patch, { updatedAt: rec.updatedAt })); return; }
   if (db) { await db.doc(cname('settings') + '/' + id).set(rec); return; }
   STORE.settings = STORE.settings.filter(function(s) { return s._id !== id; }).concat([Object.assign(rec, { _id: id })]);
   onData();
@@ -92,7 +95,8 @@ function openImportHub() {
       byId('impBackup').addEventListener('click', openRestore);
     } });
 }
-var BACKUP_COLLS = ['documents','contacts','products','accounts','employees','taxReturns','settings'];
+// branches first: restored documents may refer to them
+var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
 async function backupData() {
   var data = { app:'PSMacc', company: companyName(), exportedAt: new Date().toISOString() };
   BACKUP_COLLS.forEach(function(c) { data[c] = STORE[c]; });

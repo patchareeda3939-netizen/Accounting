@@ -2,7 +2,9 @@ rules_version = '2';
 // PSMacc: ข้อมูลแยกตามบริษัท สิทธิ์ owner (เจ้าของ) / editor (ผู้แก้ไข) / viewer (ผู้ดู)
 //   companies/{co}                   name, taxId, ownerId (= เจ้าของหลัก), memberIds (ใช้ค้นบริษัทของผู้ใช้)
 //   companies/{co}/members/{uid}     { role, email, addedAt, auditId }  role 'removed' = ถูกนำออกแล้ว
-//   companies/{co}/audit/{id}        บันทึกการเปลี่ยนสิทธิ์ (สร้างได้อย่างเดียว แก้/ลบไม่ได้)
+//   companies/{co}/audit/{id}        บันทึกการเปลี่ยนสิทธิ์ ล็อก/ปลดล็อกงวด และลบสาขา (สร้างได้อย่างเดียว แก้/ลบไม่ได้)
+//   companies/{co}/branches/{code}   สาขา { code, name, address, phone, active, used, createdAt }
+//                                    used = มีเอกสารอ้างอิงแล้ว (ตั้งเป็น true ได้ทางเดียว ยกเลิกไม่ได้)
 //   companies/{co}/{collection}/{id} ข้อมูลบัญชี (documents, contacts, accounts, settings, ...)
 //   ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก (companies/{co} และ settings/company) แก้ได้เฉพาะเจ้าของ
 //   invites/{co}__{email}            คำเชิญที่ยังไม่ตอบรับ
@@ -31,6 +33,47 @@ service cloud.firestore {
     function touchesLegal(coll, id) {
       return coll == 'settings' && id == 'company'
         && (request.method == 'delete' || request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasAny(legalFields()));
+    }
+
+    // งวดบัญชี (settings/company.lockDate): ผู้แก้ไขล็อกได้ (เลื่อนไปข้างหน้า) ปลดล็อกได้เฉพาะเจ้าของ
+    // ทุกการเปลี่ยน lockDate ต้องมี audit 'period_lock' / 'period_unlock' ใน batch เดียวกัน
+    function settingsCompany(co) { return /databases/$(database)/documents/companies/$(co)/settings/company; }
+    function lockOf(r) { return r == null ? '' : r.data.get('lockDate', ''); }
+    function lockChanged(coll, id) {
+      return coll == 'settings' && id == 'company'
+        && (request.method == 'delete' ? lockOf(resource) != '' : request.resource.data.get('lockDate', '') != lockOf(resource));
+    }
+    function lockWriteOk(co) {
+      return request.method != 'delete'
+        && request.resource.data.get('lockAuditId', '') != (resource == null ? '' : resource.data.get('lockAuditId', ''))
+        && !exists(auditPath(co, request.resource.data.lockAuditId))
+        && existsAfter(auditPath(co, request.resource.data.lockAuditId));
+    }
+    function validLockAudit(co, id, a) {
+      let s = settingsCompany(co);
+      let before = exists(s) ? get(s).data.get('lockDate', '') : '';
+      let after = getAfter(s).data;
+      return canEdit(co) && after.get('lockAuditId', '') == id
+        && a.fromDate == before && a.toDate == after.get('lockDate', '')
+        && (a.action == 'period_lock' ? a.toDate > a.fromDate : (isOwner(co) && a.toDate < a.fromDate));
+    }
+
+    // สาขา: ลบได้เมื่อมี audit 'branch_delete' ใน batch เดียวกัน; สาขาที่มีประวัติ (used) ลบได้เฉพาะเจ้าของ
+    function branchPath(co, code) { return /databases/$(database)/documents/companies/$(co)/branches/$(code); }
+    function branchFields() { return ['code', 'name', 'address', 'phone', 'active', 'used', 'createdAt']; }
+    function validBranchDeleteAudit(co, id, a) {
+      let b = branchPath(co, a.branchCode);
+      return exists(b) && !existsAfter(b)
+        && id == 'bdel_' + a.branchCode + '_' + string(get(b).data.createdAt)
+        && a.branchUsed == get(b).data.get('used', false)
+        && (isOwner(co) || (canEdit(co) && get(b).data.get('used', false) == false));
+    }
+    // เอกสารที่อ้างสาขาใหม่ ต้องทำเครื่องหมาย used ที่สาขานั้นก่อน (หรือพร้อมกันใน batch)
+    function branchRef(r) { let ex = r == null ? null : r.data.get('extra', null); return ex is map ? ex.get('branch', null) : null; }
+    function docBranchOk(co) {
+      let b = branchRef(request.resource);
+      return b == null || b == '' || b == '00000' || b == branchRef(resource)
+        || (b is string && getAfter(branchPath(co, b)).data.get('used', false) == true);
     }
 
     // audit entry ต้องตรงกับการเปลี่ยนแปลงจริงของสมาชิกใน batch เดียวกัน
@@ -97,17 +140,38 @@ service cloud.firestore {
       match /audit/{id} {
         allow read: if isOwner(co);
         allow create: if signedIn()
-          && request.resource.data.keys().hasOnly(['action', 'actorUid', 'actorEmail', 'targetUid', 'targetEmail', 'fromRole', 'toRole', 'grantedBy', 'at'])
+          && request.resource.data.keys().hasOnly(['action', 'actorUid', 'actorEmail', 'targetUid', 'targetEmail', 'fromRole', 'toRole', 'grantedBy', 'fromDate', 'toDate', 'branchCode', 'branchUsed', 'at'])
           && request.resource.data.actorUid == request.auth.uid
           && request.resource.data.actorEmail == myEmail()
           && request.resource.data.at == request.time
-          && validAudit(co, id, request.resource.data);
+          && (request.resource.data.action in ['period_lock', 'period_unlock'] ? validLockAudit(co, id, request.resource.data)
+            : request.resource.data.action == 'branch_delete' ? validBranchDeleteAudit(co, id, request.resource.data)
+            : validAudit(co, id, request.resource.data));
         allow update, delete: if false;
+      }
+
+      match /branches/{code} {
+        allow read: if isMember(co);
+        allow create: if canEdit(co) && code.matches('^[0-9]{5}$') && code != '00000'
+          && request.resource.data.keys().hasOnly(branchFields())
+          && request.resource.data.code == code && request.resource.data.createdAt is int
+          && request.resource.data.get('used', false) is bool;
+        // แก้ชื่อ/ที่อยู่/โทร/สถานะได้; รหัสและ createdAt เปลี่ยนไม่ได้; used ยกเลิกไม่ได้
+        allow update: if canEdit(co)
+          && request.resource.data.keys().hasOnly(branchFields())
+          && request.resource.data.code == resource.data.code && request.resource.data.createdAt == resource.data.createdAt
+          && (resource.data.get('used', false) == false || request.resource.data.get('used', false) == true);
+        allow delete: if canEdit(co)
+          && !exists(auditPath(co, 'bdel_' + code + '_' + string(resource.data.createdAt)))
+          && existsAfter(auditPath(co, 'bdel_' + code + '_' + string(resource.data.createdAt)));
       }
 
       match /{coll}/{id} {
         allow read: if !(coll in ['members', 'audit']) && isMember(co);
-        allow write: if !(coll in ['members', 'audit']) && canEdit(co) && (!touchesLegal(coll, id) || isOwner(co));
+        allow write: if !(coll in ['members', 'audit', 'branches']) && canEdit(co)
+          && (!touchesLegal(coll, id) || isOwner(co))
+          && (!lockChanged(coll, id) || lockWriteOk(co))
+          && (coll != 'documents' || request.method == 'delete' || docBranchOk(co));
       }
     }
 

@@ -179,7 +179,22 @@ function fbOpenAccount() {
 }
 
 /* ---- Users & roles of the current company ---- */
-var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก' };
+var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก', period_lock:'ล็อกงวดบัญชี', period_unlock:'ปลดล็อกงวดบัญชี', branch_delete:'ลบสาขา' };
+function fbSaveSettings(id, patch) { var v = fbEncode(patch); return FB.fs.doc('companies/' + CUR_CO + '/settings/' + id).set(v, { mergeFields: Object.keys(v) }); }
+// period lock: settings/company.lockDate + audit entry in one batch
+async function fbSetLockDate(to, action) {
+  var fs = FB.fs, co = CUR_CO, b = fs.batch(), ref = fs.collection('companies/' + co + '/audit').doc();
+  b.set(ref, { action: action, actorUid: FB.user.uid, actorEmail: fbEmail(), fromDate: lockDate(), toDate: to, at: firebase.firestore.FieldValue.serverTimestamp() });
+  b.set(fs.doc('companies/' + co + '/settings/company'), { lockDate: to, lockAuditId: ref.id, updatedAt: Date.now() }, { merge: true });
+  await b.commit();
+}
+// branch delete: audit id is derived from the branch so the rules can require it
+async function fbDeleteBranch(br) {
+  var fs = FB.fs, co = CUR_CO, b = fs.batch();
+  b.set(fs.doc('companies/' + co + '/audit/bdel_' + br.code + '_' + br.createdAt), { action: 'branch_delete', actorUid: FB.user.uid, actorEmail: fbEmail(), branchCode: br.code, branchUsed: !!br.used, at: firebase.firestore.FieldValue.serverTimestamp() });
+  b.delete(fs.doc('companies/' + co + '/branches/' + br.code));
+  await b.commit();
+}
 function fbOpenMembers() {
   openModal({ title:'จัดการผู้ใช้', focus:false, body:'<div id="mbBody" class="muted">กำลังโหลด…</div>', buttons:[{ label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
   fbRenderMembers();
@@ -214,8 +229,13 @@ async function fbRenderMembers() {
       '<div class="toolbar"><button type="button" class="btn btn-dark" id="mbInvite">เชิญ</button></div><div class="form-error" id="formError" hidden></div>' +
       '<p class="small muted" style="margin:6px 0 0">ระบบไม่ได้ส่งอีเมลเชิญให้ แจ้งผู้ใช้ให้สมัครสมาชิกด้วยอีเมลนี้และกดยืนยันอีเมล แล้วบริษัทนี้จะปรากฏให้อัตโนมัติเมื่อเข้าสู่ระบบ</p>' +
       (inv.length ? '<h3 style="margin:18px 0 8px;font-size:15px">คำเชิญที่รอตอบรับ</h3><div class="items-wrap"><table class="data-table"><tbody>' + inv.map(function(x) { return '<tr><td>' + esc(x.email) + '</td><td>' + esc(ROLE_LABEL[x.role] || x.role) + '</td><td><button type="button" class="linkish" data-mbrevoke="' + esc(x.id) + '">ยกเลิกคำเชิญ</button></td></tr>'; }).join('') + '</tbody></table></div>' : '') +
-      '<h3 style="margin:18px 0 8px;font-size:15px">ประวัติการเปลี่ยนสิทธิ์</h3>' + (log.length ? '<div class="items-wrap"><table class="data-table" id="mbAudit"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>รายการ</th><th>ผู้ใช้</th><th>สิทธิ์</th></tr></thead><tbody>' +
-        log.map(function(a) { return '<tr><td class="small">' + esc(fmtAt(a.at)) + '</td><td>' + esc(a.actorEmail) + '</td><td>' + esc(AUDIT_LABEL[a.action] || a.action) + '</td><td>' + esc(a.targetEmail) + '</td><td class="small">' + esc((ROLE_LABEL[a.fromRole] || a.fromRole) + ' → ' + (ROLE_LABEL[a.toRole] || a.toRole)) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">ยังไม่มีรายการ</p>')
+      '<h3 style="margin:18px 0 8px;font-size:15px">ประวัติการเปลี่ยนสิทธิ์ ล็อกงวด และลบสาขา</h3>' + (log.length ? '<div class="items-wrap"><table class="data-table" id="mbAudit"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>รายการ</th><th>ผู้ใช้ / งวด / สาขา</th><th>รายละเอียด</th></tr></thead><tbody>' +
+        log.map(function(a) {
+          var period = a.action === 'period_lock' || a.action === 'period_unlock', br = a.action === 'branch_delete';
+          var who = period ? 'งวดบัญชี' : br ? 'สาขา ' + a.branchCode : a.targetEmail;
+          var what = period ? (a.fromDate ? fmtDateNum(a.fromDate) : 'ไม่ล็อก') + ' → ' + (a.toDate ? 'ล็อกถึง ' + fmtDateNum(a.toDate) : 'ไม่ล็อก') : br ? (a.branchUsed ? 'มีประวัติ' : 'ไม่มีประวัติ') : (ROLE_LABEL[a.fromRole] || a.fromRole) + ' → ' + (ROLE_LABEL[a.toRole] || a.toRole);
+          return '<tr><td class="small">' + esc(fmtAt(a.at)) + '</td><td>' + esc(a.actorEmail) + '</td><td>' + esc(AUDIT_LABEL[a.action] || a.action) + '</td><td>' + esc(who) + '</td><td class="small">' + esc(what) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="small muted" style="margin:0">ยังไม่มีรายการ</p>')
       : '<p class="small muted" style="margin:10px 0 0">เฉพาะเจ้าของบริษัทเท่านั้นที่เชิญหรือเปลี่ยนสิทธิ์ผู้ใช้ได้</p>');
   var fail = function(e) { showToast(writeError(e)); fbRenderMembers(); };
   var find = function(uid) { return ms.find(function(x) { return x.uid === uid; }); };

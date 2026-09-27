@@ -143,8 +143,48 @@ async function verify(email) {
   const eUi = await e.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
   ok('editor: legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)), eUi);
   ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'custPhone', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
-  const eBranch = await e.evaluate(async () => { try { await saveSettings('company', { branches: [{ code: '00001', name: 'สาขาทดสอบ', address: 'เชียงใหม่', phone: '' }] }); return 'ok'; } catch (x) { return x.code; } });
-  ok('editor can save branch data', eBranch === 'ok', eBranch);
+  // ---- branches: editor adds/edits/deactivates; branch with history cannot be deleted by editor
+  const addBranchUi = async (pg, code, name) => { await pg.click('[data-bradd]'); await pg.fill('#brCode', code); await pg.fill('#brName', name); await pg.fill('#brAddr', 'ที่อยู่ ' + name); await pg.click('#modalFoot >> text=บันทึก'); await pg.waitForTimeout(1200); };
+  await addBranchUi(e, '00001', 'สาขาหนึ่ง'); await addBranchUi(e, '00002', 'สาขาสอง');
+  ok('editor adds branches via UI', await e.evaluate(() => STORE.branches.map(b => b.code).join()) === '00001,00002', await e.evaluate(() => STORE.branches.map(b => b.code)));
+  await e.click('[data-bredit="00002"]'); await e.fill('#brCode', '00003'); await e.click('#modalFoot >> text=บันทึก'); await e.waitForTimeout(1500);
+  ok('editor changes code of a branch without history', await e.evaluate(() => STORE.branches.map(b => b.code).join()) === '00001,00003', await e.evaluate(() => STORE.branches.map(b => b.code)));
+  const eDocBr = await e.evaluate(async () => { try { await addRec('documents', { type: 'invoice', docNo: 'BR-1', party: 'A', date: '2026-09-15', items: [], total: 0, net: 0, extra: { branch: '00001' }, createdAt: Date.now() }); return 'ok'; } catch (x) { return x.code; } });
+  await e.waitForTimeout(800);
+  ok('document using a branch saves and marks the branch as used', eDocBr === 'ok' && await e.evaluate(() => STORE.branches.find(b => b.code === '00001').used === true), eDocBr);
+  const eBrUi = await e.evaluate(() => ({ del1: !!document.querySelector('[data-brdel="00001"]'), off1: !!document.querySelector('[data-bractive="00001"]'), del3: !!document.querySelector('[data-brdel="00003"]') }));
+  ok('editor: no delete button for branch with history, deactivate available', !eBrUi.del1 && eBrUi.off1 && eBrUi.del3, eBrUi);
+  await e.click('[data-bredit="00001"]');
+  ok('editor: code field locked for branch with history', await e.evaluate(() => byId('brCode').disabled));
+  await e.evaluate(() => closeModal());
+  const eDelUsed = await e.evaluate(async () => { try { await fbDeleteBranch(STORE.branches.find(b => b.code === '00001')); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor cannot delete branch with history (direct attempt)', eDelUsed === 'permission-denied', eDelUsed);
+  await e.click('[data-bractive="00001"]'); await e.waitForTimeout(1000);
+  ok('editor deactivates branch; hidden from new documents', await e.evaluate(() => STORE.branches.find(b => b.code === '00001').active === false && !branches().some(b => b.code === '00001') && branchesFor('00001').some(b => b.code === '00001')));
+  await e.click('[data-bractive="00001"]'); await e.waitForTimeout(1000);
+  ok('editor re-activates branch', await e.evaluate(() => STORE.branches.find(b => b.code === '00001').active === true));
+  await e.click('[data-brdel="00003"]'); await e.waitForTimeout(1200);
+  ok('editor deletes branch without history', await e.evaluate(() => !STORE.branches.some(b => b.code === '00003')));
+
+  // ---- period lock: editor locks, cannot unlock; owner unlocks; every change audited
+  const eLock = await e.evaluate(async () => { await lockPeriod('2026-08-31'); await new Promise(r => setTimeout(r, 800)); return lockDate(); });
+  ok('editor locks period', eLock === '2026-08-31', eLock);
+  await e.evaluate(() => { mc.ym = '2026-08'; go('accounting', 'monthClose'); }); await e.waitForTimeout(800);
+  ok('editor: no unlock button on month-close page', await e.evaluate(() => ![...document.querySelectorAll('[data-mcgo]')].some(b => /unlockPeriod/.test(b.dataset.mcgo)) && /ปลดล็อกได้เฉพาะเจ้าของ/.test(byId('pageData').textContent)));
+  await e.evaluate(() => unlockPeriod()); await e.waitForTimeout(500);
+  ok('editor unlock via app is refused', await e.evaluate(() => lockDate()) === '2026-08-31');
+  const eUnlockDirect = await e.evaluate(async () => { try { await fbSetLockDate('', 'period_unlock'); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor unlock direct attempt denied', eUnlockDirect === 'permission-denied', eUnlockDirect);
+  const eBack = await e.evaluate(async () => { try { await fbSetLockDate('2026-07-31', 'period_lock'); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor cannot move lock date backwards', eBack === 'permission-denied', eBack);
+  const eDocLocked = await e.evaluate(async () => { try { await saveSettings('company', { lockDate: '2026-12-31' }); return 'ok'; } catch (x) { return x.code; } });
+  ok('lock date change without audit entry denied', eDocLocked === 'permission-denied', eDocLocked);
+  const vLock = await v.evaluate(async () => { try { await fbSetLockDate('2026-10-31', 'period_lock'); return 'ok'; } catch (x) { return x.code; } });
+  ok('viewer cannot lock period', vLock === 'permission-denied', vLock);
+  await o.evaluate(() => { mc.ym = '2026-08'; go('accounting', 'monthClose'); }); await o.waitForTimeout(800);
+  ok('owner sees unlock button', await o.evaluate(() => [...document.querySelectorAll('[data-mcgo]')].some(b => /unlockPeriod/.test(b.dataset.mcgo))));
+  await o.evaluate(() => unlockPeriod()); await o.waitForTimeout(1000);
+  ok('owner unlocks period', await o.evaluate(() => lockDate()) === '');
   const eVat = await e.evaluate(async () => { try { await saveSettings('company', { vatRegistered: 'no' }); return 'ok'; } catch (x) { return x.code; } });
   ok('editor cannot change VAT status', eVat === 'permission-denied', eVat);
   await e.evaluate(() => { openCompanySettings(); });
@@ -158,11 +198,19 @@ async function verify(email) {
   ok('owner sees edit buttons for legal fields', !oUi.banner && oUi.edit.includes('name') && oUi.edit.includes('taxId') && oUi.bradd, oUi);
   await o.evaluate(() => saveSettings('company', { name: 'ชื่อใหม่' })); await o.waitForTimeout(2500);
   ok('owner rename synced to company list', (await e.evaluate(() => coList().map(c => c.name))).includes('ชื่อใหม่'), await e.evaluate(() => coList().map(c => c.name)));
+  // owner deletes branch with history (audited)
+  await o.evaluate(() => { closeModal(); go('settings', 'company'); }); await o.waitForTimeout(800);
+  ok('owner sees delete button for branch with history', !!(await o.$('[data-brdel="00001"]')));
+  await o.click('[data-brdel="00001"]'); await o.waitForTimeout(1500);
+  ok('owner deletes branch with history', await o.evaluate(() => !STORE.branches.some(b => b.code === '00001')));
+  ok('document keeps its branch code after branch deletion', await o.evaluate(() => (STORE.documents.find(d => d.docNo === 'BR-1') || {}).extra.branch === '00001'));
 
   // ---- Primary owner protection, audit log and transfer (UI)
   await o.evaluate(() => openUsersInfo()); await o.waitForSelector('#mbAudit', { timeout: 8000 });
   const au = await o.$$eval('#mbAudit tbody tr', rs => rs.map(r => r.textContent));
   ok('audit log lists create/join/role/remove', ['สร้างบริษัท','เข้าร่วมตามคำเชิญ','เปลี่ยนสิทธิ์','นำออก'].every(k => au.some(t => t.includes(k))), au.length);
+  ok('audit log records period lock by editor and unlock by owner with the period', au.some(t => t.includes('ล็อกงวดบัญชี') && t.includes('editor@x.com') && t.includes('31/08/2026')) && au.some(t => t.includes('ปลดล็อกงวดบัญชี') && t.includes('owner@x.com')), au.filter(t => /งวด/.test(t)));
+  ok('audit log records branch deletions (editor: no history, owner: with history)', au.some(t => t.includes('ลบสาขา') && t.includes('00003') && t.includes('editor@x.com') && t.includes('ไม่มีประวัติ')) && au.some(t => t.includes('ลบสาขา') && t.includes('00001') && t.includes('owner@x.com') && t.includes('มีประวัติ')), au.filter(t => /สาขา/.test(t)));
   const euid = await e.evaluate(() => FB.user.uid);
   o.promptAnswer = 'wrong@x.com'; await o.click('[data-mbxfer="' + euid + '"]'); await o.waitForTimeout(800);
   ok('transfer cancelled when confirmation email is wrong', await o.evaluate(() => fbPrimaryOwner() === FB.user.uid));

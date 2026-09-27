@@ -173,13 +173,13 @@ function statusPill(d) { var s = docStatus(d); return '<span class="status st-' 
 /* ================= Data store ================= */
 var db = null;
 var dbReady = false;
-var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] };
+var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] };
 var localSeq = 0;
 
 var CUR_CO = 'main', COMPANIES = [], _unsubs = [], LOCAL_CO = {};
 try { CUR_CO = localStorage.getItem('psm_company') || 'main'; } catch (e) {}
 function cname(coll) { return CUR_CO === 'main' ? coll : coll + '__' + CUR_CO; }
-var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc']];
+var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc'],['branches','code','asc']];
 async function initDb() {
   try { db = (window.claude && window.claude.use) ? await window.claude.use('db') : null; } catch (e) { db = null; }
   if (!db && fbConfigured()) db = await fbStart();
@@ -190,8 +190,10 @@ async function initDb() {
   subscribeAll();
   if (FB_MODE) fbAfterStart();
 }
+var _loaded = {};
+function collectionsLoaded() { return !db || SUBS.every(function(s) { return _loaded[s[0]]; }); }
 function subscribeAll() {
-  _unsubs.forEach(function(u) { try { u && u(); } catch (e) {} }); _unsubs = [];
+  _unsubs.forEach(function(u) { try { u && u(); } catch (e) {} }); _unsubs = []; _loaded = {};
   SUBS.forEach(function(s) { subscribe(s[0], s[1], s[2]); });
 }
 function subscribe(coll, field, dir) {
@@ -200,6 +202,7 @@ function subscribe(coll, field, dir) {
     var u = db.collection(cname(coll)).orderBy(field, dir).limit(1000).onSnapshot(function(snap) {
       if (co !== CUR_CO) return;
       STORE[coll] = snap.docs.map(function(d) { var o = Object.assign({}, d.data()); o._id = d.id; return o; });
+      _loaded[coll] = true;
       onData();
     }, function(err) { showToast('โหลดข้อมูล ' + coll + ' ไม่สำเร็จ'); });
     _unsubs.push(u);
@@ -207,7 +210,7 @@ function subscribe(coll, field, dir) {
 }
 function switchCompany(id) {
   if (id === CUR_CO) return;
-  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[] }; }
+  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] }; }
   else SUBS.forEach(function(s) { STORE[s[0]] = []; });
   CUR_CO = id; try { localStorage.setItem('psm_company', id); } catch (e) {}
   if (!db && !LOCAL_CO[id]) localLoad();
@@ -218,7 +221,7 @@ function switchCompany(id) {
 }
 function strip(rec) { var o = Object.assign({}, rec); delete o._id; return o; }
 function sortLocal(coll) {
-  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1] }[coll];
+  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1], branches:['code',1] }[coll];
   STORE[coll].sort(function(a, b) { var x = a[f[0]], y = b[f[0]]; return (x > y ? 1 : x < y ? -1 : 0) * f[1]; });
 }
 function writeError(e) {
@@ -229,12 +232,14 @@ function writeError(e) {
   return 'บันทึกไม่สำเร็จ ลองอีกครั้ง';
 }
 async function addRec(coll, rec) {
+  if (coll === 'documents') await markBranchUsed(rec);
   if (db) { var ref = await db.collection(cname(coll)).add(rec); return ref && ref.id; }
   rec = Object.assign({}, rec, { _id: 'local' + (++localSeq) });
   STORE[coll].push(rec); sortLocal(coll); onData();
   return rec._id;
 }
 async function setRec(coll, id, rec) {
+  if (coll === 'documents') await markBranchUsed(rec);
   if (db) { await db.doc(cname(coll) + '/' + id).set(strip(rec)); return; }
   var i = STORE[coll].findIndex(function(r) { return r._id === id; });
   if (i >= 0) STORE[coll][i] = Object.assign({}, strip(rec), { _id:id });
@@ -281,6 +286,7 @@ function onData() {
   renderDatalists();
   renderDashboard();
   if (!byId('sectionView').hidden) refreshPageData();
+  if (dbReady) migrateLegacyBranches();
 }
 
 /* ================= Datalists ================= */
@@ -452,7 +458,7 @@ function openDocForm(typeKey, doc, prefill) {
   if (def.group === 'customer' || def.group === 'supplier') html += '<div class="field"><label for="f_note">หมายเหตุ (แสดงในแบบฟอร์ม)</label><input id="f_note" type="text" value="' + esc(ex.note || '') + '"></div>';
   form.attachments = ((ex.attachments) || []).slice();
   if (def.group === 'customer' || def.group === 'supplier' || def.group === 'other') html += dimSelectsHTML(ex);
-  if (branches().length && (def.group === 'customer' || def.group === 'supplier')) html += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branches()).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
+  if (branchesFor(ex.branch).length && (def.group === 'customer' || def.group === 'supplier')) html += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branchesFor(ex.branch)).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
   html += '<div class="field"><label>ไฟล์แนบ</label><div id="attList" class="att-list"></div><label class="btn btn-outline att-add">📎 แนบไฟล์<input type="file" id="attInput" multiple hidden accept="image/*,application/pdf,.csv,.txt,.json,.md"></label><div class="small muted" id="attMsg">รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB ต่อไฟล์</div></div>';
 
   if (def.template === 'itemized') {

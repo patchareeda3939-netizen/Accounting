@@ -202,6 +202,97 @@ await expect('legal fields unchanged by User/Viewer attempts', 'allow', async ()
 await expect('User E: write other settings documents (month-end close)', 'allow', () => setDoc(doc(E.db, 'companies/co1/settings/close_2026-09'), { done: { a: true } }));
 await expect('Viewer V: write other settings documents', 'deny', () => setDoc(doc(V.db, 'companies/co1/settings/close_2026-09'), { done: { a: false } }));
 
+S('R13', 'สาขา: User เพิ่ม/แก้/ปิดใช้งานได้, สาขาที่มีประวัติ User ลบไม่ได้, Owner/Admin ลบได้พร้อม Audit Log');
+const brDoc = (u, code, co = 'co1') => doc(u.db, `companies/${co}/branches/${code}`);
+const mkBranch = (u, code, extra = {}, co = 'co1') => setDoc(brDoc(u, code, co), { code, name: 'สาขา ' + code, address: 'addr', phone: '', active: true, used: false, createdAt: Date.now(), ...extra });
+async function delBranch(u, code, opt = {}) {
+  const cur = (await getDoc(brDoc(A, code))).data();
+  const b = writeBatch(u.db);
+  if (!opt.noAudit) b.set(doc(u.db, `companies/co1/audit/${opt.auditId || 'bdel_' + code + '_' + cur.createdAt}`), { action: 'branch_delete', actorUid: u.uid, actorEmail: u.email, branchCode: code, branchUsed: opt.claimUsed ?? !!cur.used, at: serverTimestamp() });
+  b.delete(brDoc(u, code)); await b.commit();
+}
+const docWith = (u, id, extra) => setDoc(doc(u.db, `companies/co1/documents/${id}`), extra === undefined ? { t: 1 } : { t: 1, extra });
+for (const [i, [r, u]] of roles.entries()) await expect(`${r}: add a branch`, W(r), () => mkBranch(u, '1000' + (i + 1)));
+await expect('User E: branch code must be 5 digits', 'deny', () => mkBranch(E, '12'));
+await expect('User E: branch code 00000 is reserved for head office', 'deny', () => mkBranch(E, '00000'));
+await expect('User E: document id must equal branch code', 'deny', () => setDoc(brDoc(E, '20001'), { code: '20002', name: 'x', address: 'a', active: true, used: false, createdAt: 1 }));
+await expect('User E: unknown branch field', 'deny', () => mkBranch(E, '20003', { note: 'x' }));
+await expect('User E: createdAt must be an integer', 'deny', () => mkBranch(E, '20004', { createdAt: 'yesterday' }));
+await mkBranch(E, '20001');
+await expect('User E: edit branch name/address/phone', 'allow', () => updateDoc(brDoc(E, '20001'), { name: 'ใหม่', address: 'ที่อยู่ใหม่', phone: '02' }));
+await expect('User E: deactivate branch', 'allow', () => updateDoc(brDoc(E, '20001'), { active: false }));
+await expect('User E: re-activate branch', 'allow', () => updateDoc(brDoc(E, '20001'), { active: true }));
+await expect('User E: change code field of existing branch', 'deny', () => updateDoc(brDoc(E, '20001'), { code: '20009' }));
+await expect('User E: change createdAt', 'deny', () => updateDoc(brDoc(E, '20001'), { createdAt: 5 }));
+await expect('Viewer V: edit branch', 'deny', () => updateDoc(brDoc(V, '20001'), { name: 'v' }));
+await expect('Viewer V: deactivate branch', 'deny', () => updateDoc(brDoc(V, '20001'), { active: false }));
+// history (used) flag and documents
+await expect('User E: document referring to a branch not marked used', 'deny', () => docWith(E, 'bd1', { branch: '20001' }));
+await expect('User E: mark branch as used', 'allow', () => updateDoc(brDoc(E, '20001'), { used: true }));
+await expect('User E: document referring to a used branch', 'allow', () => docWith(E, 'bd1', { branch: '20001' }));
+await mkBranch(E, '20002');
+await expect('User E: mark used + document in one batch', 'allow', async () => { const b = writeBatch(E.db); b.update(brDoc(E, '20002'), { used: true }); b.set(doc(E.db, 'companies/co1/documents/bd2'), { t: 1, extra: { branch: '20002' } }); await b.commit(); });
+await expect('User E: clear used flag', 'deny', () => updateDoc(brDoc(E, '20001'), { used: false }));
+await expect('Primary Owner A: clear used flag', 'deny', () => updateDoc(brDoc(A, '20001'), { used: false }));
+await expect('User E: document referring to a missing branch', 'deny', () => docWith(E, 'bd3', { branch: '29999' }));
+await expect('User E: document for head office (00000)', 'allow', () => docWith(E, 'bd4', { branch: '00000' }));
+await expect('User E: document with empty branch', 'allow', () => docWith(E, 'bd5', { branch: '' }));
+await expect('User E: document without branch', 'allow', () => docWith(E, 'bd6'));
+// delete
+await mkBranch(E, '20005');
+await expect('User E: delete branch without history, without audit', 'deny', () => delBranch(E, '20005', { noAudit: true }));
+await expect('User E: delete with audit id not matching the branch', 'deny', () => delBranch(E, '20005', { auditId: 'bdel_20005_1' }));
+await expect('Viewer V: delete branch without history', 'deny', () => delBranch(V, '20005'));
+await expect('User E: delete branch without history (with audit)', 'allow', () => delBranch(E, '20005'));
+await expect('User E: delete branch with history (with audit)', 'deny', () => delBranch(E, '20001'));
+await expect('User E: delete branch with history claiming no history', 'deny', () => delBranch(E, '20001', { claimUsed: false }));
+await expect('Admin C: delete branch with history without audit', 'deny', () => delBranch(C, '20001', { noAudit: true }));
+await expect('Admin C: delete branch with history (with audit)', 'allow', () => delBranch(C, '20001'));
+await expect('Primary Owner A: delete branch with history (with audit)', 'allow', () => delBranch(A, '20002'));
+await expect('audit log records branch deletions with actor and history flag', 'allow', async () => { const q = await getDocs(collection(A.db, 'companies/co1/audit')); const a = q.docs.map(d => d.data()).filter(x => x.action === 'branch_delete'); if (!(a.some(x => x.branchCode === '20001' && x.actorUid === C.uid && x.branchUsed === true && x.at) && a.some(x => x.branchCode === '20005' && x.actorUid === E.uid && x.branchUsed === false))) throw new Error(JSON.stringify(a)); });
+await expect('User E: update a document that still refers to a deleted branch (unchanged)', 'allow', () => setDoc(doc(E.db, 'companies/co1/documents/bd1'), { t: 2, extra: { branch: '20001' } }));
+await expect('User E: point another document to the deleted branch', 'deny', () => docWith(E, 'bd4', { branch: '20001' }));
+await expect('B (other company): add branch to co1', 'deny', () => mkBranch(B, '30001'));
+await expect('B (other company): read co1 branches', 'deny', () => getDocs(collection(B.db, 'companies/co1/branches')));
+await expect('Viewer V: read branches', 'allow', () => getDocs(collection(V.db, 'companies/co1/branches')));
+
+S('R14', 'งวดบัญชี: User ล็อกได้ ปลดล็อกไม่ได้, Owner/Admin ปลดล็อกได้, ทุกครั้งมี Audit Log');
+const sc = u => doc(u.db, 'companies/co1/settings/company');
+let curLock = '';
+async function lock(u, to, action, opt = {}) {
+  const b = writeBatch(u.db); const ref = doc(collection(u.db, 'companies/co1/audit'));
+  if (!opt.noAudit) b.set(ref, { action, actorUid: u.uid, actorEmail: u.email, fromDate: opt.from ?? curLock, toDate: to, at: serverTimestamp() });
+  b.set(sc(u), { lockDate: to, lockAuditId: opt.auditId || ref.id }, { merge: true });
+  await b.commit(); curLock = to;
+}
+await setDoc(sc(A), { lockDate: '', lockAuditId: '' }, { merge: true });
+await expect('User E: lock period Jan', 'allow', () => lock(E, '2026-01-31', 'period_lock'));
+await expect('User E: lock further (Feb)', 'allow', () => lock(E, '2026-02-28', 'period_lock'));
+await expect('User E: unlock (clear lock)', 'deny', () => lock(E, '', 'period_unlock'));
+await expect('User E: move lock back (labelled unlock)', 'deny', () => lock(E, '2026-01-31', 'period_unlock'));
+await expect('User E: move lock back (labelled lock)', 'deny', () => lock(E, '2026-01-31', 'period_lock'));
+await expect('User E: change lockDate without audit', 'deny', () => lock(E, '2026-03-31', 'period_lock', { noAudit: true }));
+await expect('User E: lock with wrong previous date in audit', 'deny', () => lock(E, '2026-03-31', 'period_lock', { from: '2026-01-31' }));
+await expect('User E: lock forward labelled as unlock', 'deny', () => lock(E, '2026-03-31', 'period_unlock'));
+await expect('User E: reuse an old lockAuditId', 'deny', async () => { const old = (await getDoc(sc(A))).data().lockAuditId; await lock(E, '2026-03-31', 'period_lock', { noAudit: true, auditId: old }); });
+await expect('Viewer V: lock period', 'deny', () => lock(V, '2026-03-31', 'period_lock'));
+await expect('B (other company): lock co1 period', 'deny', () => lock(B, '2026-03-31', 'period_lock'));
+await expect('User E: edit phone while period is locked', 'allow', () => setDoc(sc(E), { phone: '02-999' }, { merge: true }));
+await expect('Primary Owner A: overwrite settings dropping lockDate without audit', 'deny', async () => { const cur = (await getDoc(sc(A))).data(); delete cur.lockDate; await setDoc(sc(A), cur); });
+await expect('Primary Owner A: delete settings/company while locked', 'deny', () => deleteDoc(sc(A)));
+await expect('Admin C: lock forward labelled as unlock', 'deny', () => lock(C, '2026-03-31', 'period_unlock'));
+await expect('Admin C: unlock back to Jan', 'allow', () => lock(C, '2026-01-31', 'period_unlock'));
+await expect('Primary Owner A: unlock completely', 'allow', () => lock(A, '', 'period_unlock'));
+await expect('User E: lock again after unlock', 'allow', () => lock(E, '2026-02-28', 'period_lock'));
+await expect('audit log records who, when and which period for every lock/unlock', 'allow', async () => {
+  const a = (await getDocs(query(collection(A.db, 'companies/co1/audit'), orderBy('at', 'asc')))).docs.map(d => d.data()).filter(x => /^period_/.test(x.action));
+  const seq = a.map(x => [x.action, x.actorUid === E.uid ? 'E' : x.actorUid === C.uid ? 'C' : x.actorUid === A.uid ? 'A' : '?', x.fromDate, x.toDate, !!x.at].join('|')).join(' ; ');
+  const want = ['period_lock|E||2026-01-31|true', 'period_lock|E|2026-01-31|2026-02-28|true', 'period_unlock|C|2026-02-28|2026-01-31|true', 'period_unlock|A|2026-01-31||true', 'period_lock|E||2026-02-28|true'].join(' ; ');
+  if (seq !== want) throw new Error(seq);
+});
+await expect('User E: cannot read audit log', 'deny', () => getDocs(collection(E.db, 'companies/co1/audit')));
+await lock(A, '', 'period_unlock');
+
 S('R5', 'Co-owner (Admin) ห้ามลดสิทธิ์หรือนำ Primary Owner ออก');
 await expect('Admin C: demote Primary Owner A to editor', 'deny', () => setRole(C, 'co1', A, 'owner', 'editor'));
 await expect('Admin C: demote Primary Owner A to viewer', 'deny', () => setRole(C, 'co1', A, 'owner', 'viewer'));
