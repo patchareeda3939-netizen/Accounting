@@ -125,9 +125,25 @@ async function verify(email) {
   ok('removed user loses access (back to no-company screen)', !!(await v.$('#auCo')));
   ok('owner cannot change own role', await o.evaluate(async () => { try { await FB.fs.doc('companies/' + CUR_CO + '/members/' + FB.user.uid).update({ role: 'viewer' }); return false; } catch (x) { return x.code === 'permission-denied'; } }));
 
-  // ---- editor renames company in settings → registry synced (editor may change name/taxId only)
-  await e.evaluate(() => saveSettings('company', { name: 'ชื่อใหม่' })); await e.waitForTimeout(2500);
-  ok('editor rename synced to company list', (await o.evaluate(() => coList().map(c => c.name))).includes('ชื่อใหม่'), await o.evaluate(() => coList().map(c => c.name)));
+  // ---- legal-entity data (name, tax ID, ...): only owners may change it
+  const eRename = await e.evaluate(async () => { try { await saveSettings('company', { name: 'แก้โดยผู้แก้ไข' }); return 'ok'; } catch (x) { return writeError(x); } });
+  ok('editor cannot rename company (Thai message)', /ไม่มีสิทธิ์/.test(eRename), eRename);
+  const eTax = await e.evaluate(async () => { try { await saveSettings('company', { taxId: '0105550000015' }); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor cannot change tax ID', eTax === 'permission-denied', eTax);
+  const ePhone = await e.evaluate(async () => { try { await saveSettings('company', { phone: '02-111-1111' }); return 'ok'; } catch (x) { return x.code; } });
+  ok('editor can still change non-legal company info (phone)', ePhone === 'ok', ePhone);
+  await e.evaluate(() => go('settings', 'company')); await e.waitForTimeout(800);
+  const eUi = await e.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
+  ok('editor sees legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'branch', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)) && eUi.edit.includes('phone') && !eUi.bradd, eUi);
+  await e.evaluate(() => { openCompanySettings(); });
+  const eModal = await e.evaluate(() => ({ nameDisabled: byId('s_name').disabled, taxDisabled: byId('s_taxId').disabled, phoneDisabled: byId('s_phone').disabled }));
+  ok('editor settings dialog disables legal inputs only', eModal.nameDisabled && eModal.taxDisabled && !eModal.phoneDisabled, eModal);
+  await e.evaluate(() => closeModal());
+  await o.evaluate(() => go('settings', 'company')); await o.waitForTimeout(800);
+  const oUi = await o.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
+  ok('owner sees edit buttons for legal fields', !oUi.banner && oUi.edit.includes('name') && oUi.edit.includes('taxId') && oUi.bradd, oUi);
+  await o.evaluate(() => saveSettings('company', { name: 'ชื่อใหม่' })); await o.waitForTimeout(2500);
+  ok('owner rename synced to company list', (await e.evaluate(() => coList().map(c => c.name))).includes('ชื่อใหม่'), await e.evaluate(() => coList().map(c => c.name)));
 
   // ---- Primary owner protection, audit log and transfer (UI)
   await o.evaluate(() => openUsersInfo()); await o.waitForSelector('#mbAudit', { timeout: 8000 });

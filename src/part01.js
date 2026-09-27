@@ -4,6 +4,9 @@ var FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู', removed:'ถูกนำออก', none:'-' };
 function fbConfigured() { return typeof FIREBASE_CONFIG !== 'undefined' && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey); }
 function fbReadOnly() { return FB_MODE && CUR_ROLE === 'viewer'; }
+// ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก: แก้ได้เฉพาะเจ้าของ (บังคับซ้ำใน firestore.rules)
+var LEGAL_FIELDS = ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
+function canEditLegal() { return !FB_MODE || CUR_ROLE === 'owner'; }
 function fbEmail() { return FB && FB.user ? String(FB.user.email || '').toLowerCase() : ''; }
 
 /* ---- Firestore stores nested arrays, undefined and '' keys poorly: encode on write, decode on read ---- */
@@ -144,7 +147,9 @@ function fbWatchRole() {
   _fbRoleUnsub = FB.fs.doc('companies/' + co + '/members/' + FB.user.uid).onSnapshot(function(s) {
     if (co !== CUR_CO) return;
     if (!s.exists || s.data().role === 'removed') return removed();
+    var changed = CUR_ROLE !== s.data().role;
     CUR_ROLE = s.data().role; fbRoleBadge();
+    if (changed && byId('sectionView') && !byId('sectionView').hidden) refreshPageData(); // edit controls depend on the role
   }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
 function fbRoleBadge() {

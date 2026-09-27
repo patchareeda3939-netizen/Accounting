@@ -721,6 +721,9 @@ var FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 var ROLE_LABEL = { owner:'เจ้าของ', editor:'ผู้แก้ไข', viewer:'ผู้ดู', removed:'ถูกนำออก', none:'-' };
 function fbConfigured() { return typeof FIREBASE_CONFIG !== 'undefined' && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey); }
 function fbReadOnly() { return FB_MODE && CUR_ROLE === 'viewer'; }
+// ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก: แก้ได้เฉพาะเจ้าของ (บังคับซ้ำใน firestore.rules)
+var LEGAL_FIELDS = ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart'];
+function canEditLegal() { return !FB_MODE || CUR_ROLE === 'owner'; }
 function fbEmail() { return FB && FB.user ? String(FB.user.email || '').toLowerCase() : ''; }
 
 /* ---- Firestore stores nested arrays, undefined and '' keys poorly: encode on write, decode on read ---- */
@@ -861,7 +864,9 @@ function fbWatchRole() {
   _fbRoleUnsub = FB.fs.doc('companies/' + co + '/members/' + FB.user.uid).onSnapshot(function(s) {
     if (co !== CUR_CO) return;
     if (!s.exists || s.data().role === 'removed') return removed();
+    var changed = CUR_ROLE !== s.data().role;
     CUR_ROLE = s.data().role; fbRoleBadge();
+    if (changed && byId('sectionView') && !byId('sectionView').hidden) refreshPageData(); // edit controls depend on the role
   }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
 function fbRoleBadge() {
@@ -4577,11 +4582,12 @@ function openCompanySettings() {
   var cs = Object.assign({ name: companyName(), vatRegistered:'yes', fiscalStart:'1' }, companySettings());
   openModal({ title:'บัญชีและการตั้งค่า', body: '<p class="small muted" style="margin:0">ข้อมูลนี้ใช้เป็นหัวรายงานและชื่อที่แสดงด้านบน</p>' + COMPANY_FIELDS.map(function(f) { return fieldHTML(f, cs[f.key], 's_'); }).join('') + '<div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: function(b) {
-      var out = {}; COMPANY_FIELDS.forEach(function(f) { out[f.key] = byId('s_' + f.key).value.trim(); });
-      var err = !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
+      var out = {}; COMPANY_FIELDS.forEach(function(f) { if (canEditLegal() || LEGAL_FIELDS.indexOf(f.key) < 0) out[f.key] = byId('s_' + f.key).value.trim(); });
+      var err = canEditLegal() && !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
       if (err) { var e = byId('formError'); e.textContent = err; e.hidden = false; return; }
       runSave(b, async function() { await saveSettings('company', out); showToast('บันทึกการตั้งค่าบริษัทแล้ว'); closeModal(); });
     } }] });
+  if (!canEditLegal()) LEGAL_FIELDS.forEach(function(k) { var el = byId('s_' + k); if (el) { el.disabled = true; el.title = 'แก้ได้เฉพาะเจ้าของบริษัท'; } });
 }
 function openReportDefaults() {
   var cur = companySettings().defaultReportPeriod || pageState.repPeriod;
@@ -4688,6 +4694,7 @@ function companyPageData() {
   var cs = companySettings();
   var h = '<div class="co-logo-wrap"><label class="co-logo" for="coLogo" title="เปลี่ยนโลโก้">' + (cs.logo ? '<img src="' + esc(cs.logo) + '" alt="โลโก้บริษัท">' : '<svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 005.3 0 2.7 2.7 0 005.4 0 2.7 2.7 0 005.3 0"/><path d="M5 11v9h14v-9"/><path d="M10 20v-5h4v5"/></svg>') +
     '<span class="co-pen">✎</span></label><input type="file" id="coLogo" accept="image/*" hidden>' + (cs.logo ? '<button type="button" class="chip-link" id="coLogoDel">ลบโลโก้</button>' : '') + '</div>';
+  if (!canEditLegal()) h += '<div class="banner info" id="coLegalLock">ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลักแก้ได้เฉพาะเจ้าของบริษัท</div>';
   CO_SECTIONS.forEach(function(sec, si) {
     h += '<section class="co-card"><div class="co-head"><h2>' + sec[0] + '</h2><p>' + sec[1] + '</p></div>';
     sec[2].forEach(function(f) {
@@ -4698,7 +4705,8 @@ function companyPageData() {
           : f[2] === 'area' ? '<textarea id="coInput" rows="3">' + esc(raw) + '</textarea>' : '<input id="coInput" type="' + (f[2] === 'email' ? 'email' : 'text') + '" value="' + esc(raw) + '">';
         h += '<div class="co-row editing"><div class="co-lbl">' + f[1] + '</div><div class="co-edit">' + input + '<div class="form-error" id="coErr" hidden></div><div class="co-btns"><button type="button" class="btn btn-sm" id="coCancel">ยกเลิก</button><button type="button" class="btn btn-sm btn-dark" id="coSave">บันทึก</button></div></div></div>';
       } else {
-        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div><button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button></div>';
+        var locked = LEGAL_FIELDS.indexOf(key) >= 0 && !canEditLegal();
+        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div>' + (locked ? '<span class="small muted" title="แก้ได้เฉพาะเจ้าของบริษัท">🔒</span>' : '<button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button>') + '</div>';
       }
     });
     h += '</section>';
@@ -6295,7 +6303,7 @@ function openNewCompany() {
 // keep company registry name in sync with settings
 var _coSyncT = null;
 function syncCompanyRegistry() {
-  if (!db) return;
+  if (!db || !canEditLegal()) return;
   clearTimeout(_coSyncT);
   _coSyncT = setTimeout(function() {
     var cs = companySettings(), cur = COMPANIES.find(function(c) { return c._id === CUR_CO; }), name = companyName();
@@ -6316,8 +6324,8 @@ function branchesSectionHTML() {
   return '<section class="co-card"><div class="co-head"><h2>สาขา</h2><p>สาขาและที่อยู่สาขา ใช้ในหัวเอกสาร ใบกำกับภาษี และหนังสือรับรอง 50 ทวิ</p></div>' +
     '<div class="items-wrap"><table class="data-table"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th></th></tr></thead><tbody>' +
     '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
-    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap"><button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button></td></tr>'; }).join('') +
-    '</tbody></table></div><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div></section>';
+    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap">' + (canEditLegal() ? '<button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button>' : '') + '</td></tr>'; }).join('') +
+    '</tbody></table></div>' + (canEditLegal() ? '<div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div>' : '') + '</section>';
 }
 function openBranchForm(i) {
   var list = branches().slice(), b = i != null ? list[i] : null;

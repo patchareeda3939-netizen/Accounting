@@ -4,6 +4,7 @@ rules_version = '2';
 //   companies/{co}/members/{uid}     { role, email, addedAt, auditId }  role 'removed' = ถูกนำออกแล้ว
 //   companies/{co}/audit/{id}        บันทึกการเปลี่ยนสิทธิ์ (สร้างได้อย่างเดียว แก้/ลบไม่ได้)
 //   companies/{co}/{collection}/{id} ข้อมูลบัญชี (documents, contacts, accounts, settings, ...)
+//   ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลัก (companies/{co} และ settings/company) แก้ได้เฉพาะเจ้าของ
 //   invites/{co}__{email}            คำเชิญที่ยังไม่ตอบรับ
 //
 // เจ้าของหลัก (ownerId) ถูกลดสิทธิ์หรือนำออกไม่ได้ เปลี่ยนได้ทางเดียวคือเจ้าของหลักโอนสิทธิ์ให้สมาชิกอื่น
@@ -24,6 +25,12 @@ service cloud.firestore {
     function isOwner(co) { return isMember(co) && myRole(co) == 'owner'; }
     function primaryOwner(co) { return get(coPath(co)).data.ownerId; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    // ข้อมูลนิติบุคคลหลักใน settings/company: แก้ได้เฉพาะเจ้าของ (Owner/Admin)
+    function legalFields() { return ['name', 'legalName', 'taxId', 'branch', 'branches', 'businessType', 'legalAddress', 'vatRegistered', 'fiscalStart']; }
+    function touchesLegal(coll, id) {
+      return coll == 'settings' && id == 'company'
+        && (request.method == 'delete' || request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys().hasAny(legalFields()));
+    }
 
     // audit entry ต้องตรงกับการเปลี่ยนแปลงจริงของสมาชิกใน batch เดียวกัน
     function validAudit(co, id, a) {
@@ -64,8 +71,6 @@ service cloud.firestore {
         // เจ้าของแก้ข้อมูลบริษัทได้ แต่ห้ามเปลี่ยน ownerId และห้ามเอาเจ้าของหลักออกจาก memberIds
         || (isOwner(co) && request.resource.data.ownerId == resource.data.ownerId
           && resource.data.ownerId in request.resource.data.memberIds)
-        // ผู้แก้ไขเปลี่ยนได้เฉพาะชื่อและเลขผู้เสียภาษี (sync จากหน้าตั้งค่า)
-        || (canEdit(co) && changed().hasOnly(['name', 'taxId']))
         // ผู้ได้รับเชิญเพิ่มตัวเองเข้า memberIds พร้อมกับ member doc ใน batch เดียวกัน
         || (signedIn() && !isMember(co) && changed().hasOnly(['memberIds'])
           && request.resource.data.memberIds.hasAll(resource.data.memberIds)
@@ -101,7 +106,7 @@ service cloud.firestore {
 
       match /{coll}/{id} {
         allow read: if !(coll in ['members', 'audit']) && isMember(co);
-        allow write: if !(coll in ['members', 'audit']) && canEdit(co);
+        allow write: if !(coll in ['members', 'audit']) && canEdit(co) && (!touchesLegal(coll, id) || isOwner(co));
       }
     }
 

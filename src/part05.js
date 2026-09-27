@@ -53,11 +53,12 @@ function openCompanySettings() {
   var cs = Object.assign({ name: companyName(), vatRegistered:'yes', fiscalStart:'1' }, companySettings());
   openModal({ title:'บัญชีและการตั้งค่า', body: '<p class="small muted" style="margin:0">ข้อมูลนี้ใช้เป็นหัวรายงานและชื่อที่แสดงด้านบน</p>' + COMPANY_FIELDS.map(function(f) { return fieldHTML(f, cs[f.key], 's_'); }).join('') + '<div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: function(b) {
-      var out = {}; COMPANY_FIELDS.forEach(function(f) { out[f.key] = byId('s_' + f.key).value.trim(); });
-      var err = !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
+      var out = {}; COMPANY_FIELDS.forEach(function(f) { if (canEditLegal() || LEGAL_FIELDS.indexOf(f.key) < 0) out[f.key] = byId('s_' + f.key).value.trim(); });
+      var err = canEditLegal() && !out.name ? 'กรุณาระบุชื่อบริษัท' : (out.taxId && !/^\d{13}$/.test(out.taxId.replace(/[\s-]/g, '')) ? 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' : '');
       if (err) { var e = byId('formError'); e.textContent = err; e.hidden = false; return; }
       runSave(b, async function() { await saveSettings('company', out); showToast('บันทึกการตั้งค่าบริษัทแล้ว'); closeModal(); });
     } }] });
+  if (!canEditLegal()) LEGAL_FIELDS.forEach(function(k) { var el = byId('s_' + k); if (el) { el.disabled = true; el.title = 'แก้ได้เฉพาะเจ้าของบริษัท'; } });
 }
 function openReportDefaults() {
   var cur = companySettings().defaultReportPeriod || pageState.repPeriod;
@@ -164,6 +165,7 @@ function companyPageData() {
   var cs = companySettings();
   var h = '<div class="co-logo-wrap"><label class="co-logo" for="coLogo" title="เปลี่ยนโลโก้">' + (cs.logo ? '<img src="' + esc(cs.logo) + '" alt="โลโก้บริษัท">' : '<svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 005.3 0 2.7 2.7 0 005.4 0 2.7 2.7 0 005.3 0"/><path d="M5 11v9h14v-9"/><path d="M10 20v-5h4v5"/></svg>') +
     '<span class="co-pen">✎</span></label><input type="file" id="coLogo" accept="image/*" hidden>' + (cs.logo ? '<button type="button" class="chip-link" id="coLogoDel">ลบโลโก้</button>' : '') + '</div>';
+  if (!canEditLegal()) h += '<div class="banner info" id="coLegalLock">ชื่อบริษัท เลขผู้เสียภาษี และข้อมูลนิติบุคคลหลักแก้ได้เฉพาะเจ้าของบริษัท</div>';
   CO_SECTIONS.forEach(function(sec, si) {
     h += '<section class="co-card"><div class="co-head"><h2>' + sec[0] + '</h2><p>' + sec[1] + '</p></div>';
     sec[2].forEach(function(f) {
@@ -174,7 +176,8 @@ function companyPageData() {
           : f[2] === 'area' ? '<textarea id="coInput" rows="3">' + esc(raw) + '</textarea>' : '<input id="coInput" type="' + (f[2] === 'email' ? 'email' : 'text') + '" value="' + esc(raw) + '">';
         h += '<div class="co-row editing"><div class="co-lbl">' + f[1] + '</div><div class="co-edit">' + input + '<div class="form-error" id="coErr" hidden></div><div class="co-btns"><button type="button" class="btn btn-sm" id="coCancel">ยกเลิก</button><button type="button" class="btn btn-sm btn-dark" id="coSave">บันทึก</button></div></div></div>';
       } else {
-        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div><button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button></div>';
+        var locked = LEGAL_FIELDS.indexOf(key) >= 0 && !canEditLegal();
+        h += '<div class="co-row"><div class="co-lbl">' + f[1] + '</div><div class="co-val' + (v ? '' : ' empty') + '">' + (v ? esc(v) : 'ไม่มีในรายการ') + '</div>' + (locked ? '<span class="small muted" title="แก้ได้เฉพาะเจ้าของบริษัท">🔒</span>' : '<button type="button" class="co-editbtn" data-coedit="' + key + '">แก้ไข</button>') + '</div>';
       }
     });
     h += '</section>';

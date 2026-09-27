@@ -58,7 +58,7 @@ function openNewCompany() {
 // keep company registry name in sync with settings
 var _coSyncT = null;
 function syncCompanyRegistry() {
-  if (!db) return;
+  if (!db || !canEditLegal()) return;
   clearTimeout(_coSyncT);
   _coSyncT = setTimeout(function() {
     var cs = companySettings(), cur = COMPANIES.find(function(c) { return c._id === CUR_CO; }), name = companyName();
@@ -79,8 +79,8 @@ function branchesSectionHTML() {
   return '<section class="co-card"><div class="co-head"><h2>สาขา</h2><p>สาขาและที่อยู่สาขา ใช้ในหัวเอกสาร ใบกำกับภาษี และหนังสือรับรอง 50 ทวิ</p></div>' +
     '<div class="items-wrap"><table class="data-table"><thead><tr><th>รหัสสาขา</th><th>ชื่อสาขา</th><th>ที่อยู่</th><th>โทร</th><th></th></tr></thead><tbody>' +
     '<tr><td class="num">00000</td><td>' + esc(hq.name) + '</td><td class="small">' + esc(hq.address || '-') + '</td><td>' + esc(hq.phone || '') + '</td><td class="small muted">แก้ที่ข้อมูลทางกฎหมาย</td></tr>' +
-    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap"><button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button></td></tr>'; }).join('') +
-    '</tbody></table></div><div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div></section>';
+    branches().map(function(b, i) { return '<tr><td class="num">' + esc(b.code) + '</td><td>' + esc(b.name || '') + '</td><td class="small">' + esc(b.address || '') + '</td><td>' + esc(b.phone || '') + '</td><td style="white-space:nowrap">' + (canEditLegal() ? '<button type="button" class="linkish" data-bredit="' + i + '">แก้ไข</button> · <button type="button" class="linkish" data-brdel="' + i + '">ลบ</button>' : '') + '</td></tr>'; }).join('') +
+    '</tbody></table></div>' + (canEditLegal() ? '<div class="toolbar"><button type="button" class="btn btn-outline" data-bradd>+ เพิ่มสาขา</button></div>' : '') + '</section>';
 }
 function openBranchForm(i) {
   var list = branches().slice(), b = i != null ? list[i] : null;
