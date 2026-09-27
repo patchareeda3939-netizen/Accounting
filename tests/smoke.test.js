@@ -12,7 +12,7 @@ const check = (name, cond, extra) => { results.push({ ok: !!cond, name, extra })
 
 function buildPages() {
   fs.mkdirSync(TMP, { recursive: true });
-  const html = fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8');
+  const html = require('./lib').withConfig(fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8'), 'local');
   fs.writeFileSync(path.join(TMP, 'local.html'), html);
   fs.copyFileSync(path.join(__dirname, 'mockdb.js'), path.join(TMP, 'mockdb.js'));
   fs.writeFileSync(path.join(TMP, 'claudedb.html'), html.replace('<body>', '<body><script src="mockdb.js"></script>'));
