@@ -217,6 +217,7 @@
   .banner { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; }
   .banner.ok { background: var(--good-soft); color: var(--good); }
   .banner.bad { background: var(--danger-soft); color: var(--danger); }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); }
   .banner.info { background: var(--bg-accent-soft); color: var(--accent-strong); }
 
   /* Chart */
@@ -581,6 +582,7 @@
 .auth-submit{width:100%;justify-content:center;padding:10px}
 .auth-links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--text-secondary)}
 .auth-invite{display:block;margin:0;line-height:1.7}
+.ro-hide{display:none!important}
 </style>
 
 <div class="app">
@@ -616,7 +618,7 @@
         <input id="globalSearch" type="search" placeholder="ค้นหาเลขที่เอกสาร คู่ค้า หรือรายการ แล้วกด Enter">
       </label>
       <div class="topbar-icons">
-        <span class="mode-badge" id="modeBadge" hidden>โหมดชั่วคราว: ข้อมูลจะหายเมื่อรีเฟรช</span>
+        <span class="mode-badge" id="modeBadge" hidden title="ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น ควรสำรองข้อมูลสม่ำเสมอ">เก็บข้อมูลในเบราว์เซอร์นี้เท่านั้น</span>
         <button type="button" class="icon-btn" id="gearBtn" aria-label="ตั้งค่า" aria-haspopup="true" aria-expanded="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
         <div class="avatar">P</div>
         <div class="gear-panel" id="gearPanel" hidden role="menu"></div>

@@ -209,8 +209,8 @@ async function ocrCreate(i, btn) {
   try {
     if (!STORE.contacts.some(function(c) { return c.name === d.vendorName; })) await addRec('contacts', { name: d.vendorName, kind:'supplier', entity: /บริษัท|หจก|ห้างหุ้นส่วน|จำกัด/.test(d.vendorName) ? 'company' : 'person', taxId: /^\d{13}$/.test(d.vendorTaxId) ? d.vendorTaxId : '', branch: d.vendorBranch || '', address: d.vendorAddress || '', createdAt: Date.now() });
     var att = [];
-    var A = typeof ASSETS !== 'undefined' && ASSETS ? ASSETS : (window.claude && window.claude.use ? await window.claude.use('assets') : null);
-    if (A) { try { var up = await A.upload(it.file); att.push({ id: up.id, url: up.url, name: it.file.name, type: up.contentType || it.file.type, size: up.sizeBytes || it.file.size }); } catch (e) {} }
+    var A = await getAssets();
+    if (A) { try { att.push(attRecord(await A.upload(it.file), it.file)); } catch (e) {} }
     var t = ocrTotals(d), type = d.kind === 'bill' ? 'bill' : 'expense', def = DOC_TYPES[type], a = d.account && STORE.accounts.find(function(x) { return x.code === d.account; });
     var extra = { supInvNo: d.docNo, supInvDate: d.date, account: a ? a.code : '', expCategory: a ? a.name : '', attachments: att, note: 'อ่านจากเอกสาร ' + it.file.name, ocr: true };
     if (type === 'expense') extra.method = 'โอนเงิน'; else if (d.dueDate) extra.dueDate = d.dueDate;

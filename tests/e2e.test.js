@@ -39,7 +39,7 @@ async function verify(email) {
   const srv = await startServer();
   await fetch(AUTH + '/emulator/v1/projects/' + PROJECT + '/accounts', { method: 'DELETE' });
   await fetch(FSTORE + '/emulator/v1/projects/' + PROJECT + '/databases/(default)/documents', { method: 'DELETE' });
-  const b = await chromium.launch();
+  const b = await chromium.launch({ env: Object.assign({}, process.env, { LANG: 'C.UTF-8' }) }); // UTF-8 locale so Thai download file names survive
 
   // ---- owner
   const o = await page(b);
@@ -52,6 +52,16 @@ async function verify(email) {
   await o.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await o.waitForTimeout(4000);
   const os = await o.evaluate(() => ({ mode: FB_MODE, role: CUR_ROLE, name: companyName(), accts: STORE.accounts.length, cos: coList().map(c => c.name), pill: byId('companyPill').textContent, av: document.querySelector('.topbar .avatar').textContent }));
   ok('home greeting shows the signed-in user\'s email', await o.textContent('#homeGreeting') === 'สวัสดี owner@x.com !', await o.textContent('#homeGreeting'));
+  // account dialog: verification status refreshes without a new login; display name
+  await o.evaluate(() => fbOpenAccount()); await o.waitForTimeout(800);
+  ok('account dialog shows email not verified yet', /ยังไม่ยืนยัน/.test(await o.textContent('#accVerified')));
+  await o.evaluate(() => closeModal());
+  await verify('owner@x.com');
+  await o.evaluate(() => fbOpenAccount()); await o.waitForFunction(() => byId('accVerified') && /ยืนยันแล้ว/.test(byId('accVerified').textContent) && !/ยัง/.test(byId('accVerified').textContent), null, { timeout: 10000 }).catch(() => {});
+  ok('verification status updates without logging in again', await o.evaluate(() => byId('accVerified').textContent) === 'ยืนยันแล้ว', await o.evaluate(() => byId('accVerified').textContent));
+  await o.fill('#accName', 'สมชาย ทดสอบ'); await o.click('#accNameSave'); await o.waitForTimeout(1200);
+  ok('display name saved: greeting and avatar use it', await o.textContent('#homeGreeting') === 'สวัสดี สมชาย ทดสอบ !' && await o.textContent('.topbar .avatar') === 'ส', [await o.textContent('#homeGreeting'), await o.textContent('.topbar .avatar')]);
+  await o.evaluate(() => closeModal());
   ok('owner logged in, company created, COA seeded', os.mode && os.role === 'owner' && os.name === 'บริษัท เจ้าของ จำกัด' && os.accts >= 27, os);
   // write a document with nested arrays (Firestore can't store these natively)
   await o.evaluate(async () => { await addRec('documents', { type: 'invoice', docNo: 'INV-T1', party: 'A', date: '2026-09-10', items: [{ name: 'x', qty: 1, price: 100 }], total: 100, net: 100, grid: [[1, 2], [3, [4]]], blank: { '': 'e' }, u: undefined, createdAt: Date.now() }); });
@@ -90,6 +100,25 @@ async function verify(email) {
   await v.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await v.waitForTimeout(2500);
   const vs = await v.evaluate(() => ({ role: CUR_ROLE, docs: STORE.documents.length, badge: !byId('roleBadge').hidden }));
   ok('viewer joined, sees data, badge shown', vs.role === 'viewer' && vs.docs === 1 && vs.badge, vs);
+  // viewer: no create/edit/delete controls anywhere in the app
+  const visibleWrites = pg => pg.evaluate(() => [...document.querySelectorAll('button, [role="button"], [role="menuitem"]')]
+    .filter(el => el.offsetParent !== null && !el.closest('#authScreen') && el.id !== 'accNameSave' && RO_TEXT.test(el.textContent || ''))
+    .map(el => (el.textContent || '').trim().slice(0, 30)));
+  const vSweep = await v.evaluate(async () => {
+    const found = new Set(), wait = ms => new Promise(r => setTimeout(r, ms));
+    const collect = where => document.querySelectorAll('button, [role="button"], [role="menuitem"]').forEach(el => { if (el.offsetParent !== null && !el.closest('#authScreen') && el.id !== 'accNameSave' && (RO_TEXT.test(el.textContent || '') || el.matches(RO_SEL))) found.add(where + ': ' + (el.textContent || '').trim().slice(0, 30)); });
+    for (const id of [...document.querySelectorAll('.side-item')].map(e => e.id).filter(Boolean)) { const el = byId(id); if (el && el.offsetParent !== null) { el.click(); await wait(150); collect(id); closeModal && closeModal(); } }
+    for (const k of [...document.querySelectorAll('.subnav-child')].map(e => e.dataset.childKey)) { const el = document.querySelector('.subnav-child[data-child-key="' + k + '"]'); if (el) { el.click(); await wait(80); collect(k); } }
+    const d = STORE.documents[0]; if (d) { openDocDetail(d._id); await wait(300); collect('doc detail'); closeModal(); }
+    return [...found]; });
+  ok('viewer: no visible create/edit/delete control on any page or document view', vSweep.length === 0, vSweep.slice(0, 10));
+  ok('viewer: create button and quick actions hidden', await v.evaluate(() => byId('sidebarCreateBtn').offsetParent === null && document.querySelector('.quick-row').offsetParent === null));
+  await v.evaluate(() => { go('accounting', 'monthClose'); }); await v.waitForTimeout(400);
+  ok('viewer: month-close checklist inputs disabled', await v.evaluate(() => [...document.querySelectorAll('[data-mcdone]')].every(el => el.disabled)));
+  await v.evaluate(() => fbOpenAccount(true)); await v.waitForTimeout(300);
+  ok('viewer: can still set own display name', await v.evaluate(() => byId('accNameSave').offsetParent !== null));
+  await v.evaluate(() => closeModal());
+  ok('editor: create button and quick actions still visible', await e.evaluate(() => { go('home'); return byId('sidebarCreateBtn').offsetParent !== null; }) && (await visibleWrites(e)).length > 0);
   const vw = await v.evaluate(async () => { try { await addRec('contacts', { name: 'V' }); return 'ok'; } catch (x) { return writeError(x); } });
   ok('viewer write blocked with Thai message', /ดูอย่างเดียว/.test(vw), vw);
   await v.evaluate(() => go('settings', 'company')); await v.waitForTimeout(800);
@@ -232,11 +261,68 @@ async function verify(email) {
   ok('new primary sees transfer buttons', (await e.$$('[data-mbxfer]')).length >= 1);
   await e.evaluate(() => closeModal());
 
+  // ---- attachments in Firebase mode (Firebase Storage + storage.rules)
+  const attDir = path.join(TMP, 'att'); fs.mkdirSync(attDir, { recursive: true });
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  fs.writeFileSync(path.join(attDir, 'ใบเสร็จ.png'), PNG); fs.writeFileSync(path.join(attDir, 'note.txt'), 'หลักฐานการจ่าย 123');
+  await e.evaluate(() => { closeModal(); openDocForm('expense'); }); await e.fill('#f_party', 'ร้านแนบไฟล์'); await e.fill('#f_amount', '250');
+  await e.setInputFiles('#attInput', [path.join(attDir, 'ใบเสร็จ.png'), path.join(attDir, 'note.txt')]);
+  await e.waitForFunction(() => form && form.attachments.length === 2, null, { timeout: 15000 }).catch(() => {});
+  ok('attachments upload to Firebase Storage from the document form', await e.evaluate(() => form.attachments.length === 2 && form.attachments.every(a => /^companies\/[^/]+\/files\/[a-z0-9]+$/.test(a.path) && a.path.indexOf(CUR_CO) > 0)), await e.evaluate(() => [form.attachments, byId('attMsg').textContent]));
+  await e.evaluate(() => [...byId('modalFoot').querySelectorAll('button')].pop().click()); await e.waitForTimeout(1500);
+  const attDoc = await e.evaluate(() => { const d = STORE.documents.find(x => x.party === 'ร้านแนบไฟล์'); return d && { id: d._id, att: d.extra.attachments }; });
+  ok('document saved with attachment references', attDoc && attDoc.att.length === 2 && attDoc.att[0].name === 'ใบเสร็จ.png' && attDoc.att[0].type === 'image/png' && attDoc.att[1].type === 'text/plain', [attDoc, await e.evaluate(() => byId('formError') && byId('formError').textContent)]);
+  await o.waitForFunction(id => STORE.documents.some(d => d._id === id), attDoc && attDoc.id, { timeout: 8000 }).catch(() => {}); await o.evaluate(id => { closeModal(); openDocDetail(id); }, attDoc && attDoc.id); await o.waitForTimeout(800);
+  ok('another member sees the attachments on the document', (await o.$$eval('#modalBody [data-attopen]', as => as.map(a => a.textContent))).join('|').includes('note.txt'));
+  await o.click('#modalBody [data-attopen]:has-text("note.txt")'); await o.waitForSelector('.att-viewer pre', { timeout: 10000 }).catch(() => {});
+  ok('text attachment opens in the viewer', (await o.textContent('.att-viewer .att-vbody').catch(() => '')) === 'หลักฐานการจ่าย 123', await o.textContent('.att-viewer .att-vbody').catch(() => ''));
+  await o.click('.att-viewer [data-av="close"]');
+  await o.click('#modalBody [data-attopen]:has-text("ใบเสร็จ.png")'); await o.waitForSelector('.att-viewer img', { timeout: 10000 }).catch(() => {});
+  ok('image attachment opens in the viewer', await o.evaluate(() => { const i = document.querySelector('.att-viewer img'); return !!i && i.complete && i.naturalWidth === 1; }));
+  await o.click('.att-viewer [data-av="close"]'); await o.evaluate(() => closeModal());
+  const vUp = await v.evaluate(async p => { try { await (await fbStorage()).ref(p).getDownloadURL(); return 'ok'; } catch (x) { return x.code; } }, attDoc && attDoc.att[1].path);
+  ok('removed member cannot read the attachment', vUp === 'storage/unauthorized', vUp);
+  const sAtt = await s.evaluate(async p => { try { await (await fbStorage()).ref(p).getDownloadURL(); return 'ok'; } catch (x) { return x.code; } }, attDoc && attDoc.att[1].path);
+  ok('member of another company cannot read the attachment', sAtt === 'storage/unauthorized', sAtt);
+  const eBig = await e.evaluate(async () => { try { await FB_ASSETS.upload({ name: 'big.pdf', type: 'application/pdf', size: 21 * 1024 * 1024 }); return 'ok'; } catch (x) { return x.code; } });
+  const eExe = await e.evaluate(async () => { try { await FB_ASSETS.upload(new File(['MZ'], 'x.exe', { type: 'application/x-msdownload' })); return 'ok'; } catch (x) { return x.code; } });
+  ok('file size and type limits checked before upload', eBig === 'too_large' && eExe === 'unsupported_type', [eBig, eExe]);
+
+  // ---- backup: reminder when never backed up, file downloads, time of last backup saved
+  await o.keyboard.press('Escape'); await o.evaluate(() => { closeModal(); renderDashboard(); });
+  ok('backup reminder shown when company was never backed up', /ยังไม่เคยสำรองข้อมูล/.test(await o.textContent('#backupNag')), await o.textContent('#backupNag'));
+  const [bdl] = await Promise.all([o.waitForEvent('download', { timeout: 10000 }), o.evaluate(() => byId('backupNow').click())]);
+  const bfile = path.join(TMP, 'backup-e2e.json'); await bdl.saveAs(bfile); await o.waitForTimeout(1500);
+  const bjson = JSON.parse(fs.readFileSync(bfile, 'utf8'));
+  const src = await o.evaluate(() => ({ docs: STORE.documents.length, contacts: STORE.contacts.length, co: CUR_CO, name: companyName(), today: todayStr() }));
+  ok('backup file downloaded with company data', bjson.app === 'PSMacc' && bjson.version === 2 && bjson.companyId === src.co && bjson.documents.length === src.docs && bjson.company === src.name && bdl.suggestedFilename() === 'backup-' + src.name + '-' + src.today + '.json', { n: bjson.documents && bjson.documents.length, f: bdl.suggestedFilename() });
+  ok('last backup time saved and reminder hidden', await o.evaluate(() => Date.now() - lastBackup() < 60000) && (await o.textContent('#backupNag')) === '');
+  ok('viewer never sees the backup reminder', await v.evaluate(() => { renderDashboard(); return byId('backupNag') ? byId('backupNag').textContent : ''; }) === '');
+
   // ---- owner creates second company from menu, switches, data isolated
   await o.keyboard.press('Escape'); await o.evaluate(() => { closeModal(); openNewCompany(); }); await o.fill('#ncName', 'บริษัทที่สอง'); await o.click('#modalFoot >> text=สร้างและสลับไปบริษัทนี้'); await o.waitForTimeout(4000);
   const o2 = await o.evaluate(() => ({ co: CUR_CO, docs: STORE.documents.length, cos: coList().map(c => c.name), role: CUR_ROLE }));
   ok('second company created and isolated', o2.co !== coId && o2.docs === 0 && o2.cos.length === 2 && o2.role === 'owner', o2);
   ok('editor does not see owner\'s second company', (await e.evaluate(() => coList().length)) === 1);
+  // ---- restore the first company's backup into the second one
+  async function restore(file) {
+    await o.evaluate(() => { closeModal(); openRestore(); }); await o.setInputFiles('#rsFile', file); await o.waitForSelector('#rsInfo .banner');
+    await o.click('#modalFoot >> text=กู้คืน'); await o.waitForSelector('#modal', { state: 'hidden', timeout: 30000 }).catch(() => {});
+    await o.waitForTimeout(1500); return o.textContent('#toast');
+  }
+  const t1 = await restore(bfile);
+  const r1 = await o.evaluate(() => ({ docs: STORE.documents.length, contacts: STORE.contacts.length, name: companyName(), lock: lockDate() }));
+  // a document whose branch was deleted in the source company cannot be restored (rules: branch must exist)
+  const restorable = bjson.documents.filter(d => !(d.extra && d.extra.branch) || bjson.branches.some(x => x.code === d.extra.branch)).length;
+  ok('restore into another company copies its records', r1.docs === restorable && restorable >= 2 && r1.contacts >= src.contacts && /กู้คืน \d+ รายการแล้ว/.test(t1) && (restorable === src.docs || /ข้าม 1 รายการ/.test(t1)), [r1, restorable, t1]);
+  ok('restore keeps the target company\'s name and period lock', r1.name === 'บริษัทที่สอง' && !r1.lock, r1);
+  // records the rules reject (period locked) are skipped; the rest are still restored
+  await o.evaluate(() => fbSetLockDate('2099-12-31', 'period_lock')); await o.waitForTimeout(800);
+  bjson.contacts = bjson.contacts.concat([{ _id: 'restored_c1', name: 'คู่ค้าจากไฟล์', kind: 'customer', createdAt: 1 }]);
+  bjson.documents = bjson.documents.map(d => Object.assign({}, d, { _id: d._id + 'x' }));
+  fs.writeFileSync(bfile, JSON.stringify(bjson));
+  const t2 = await restore(bfile);
+  ok('restore skips records in a locked period and continues', /ข้าม \d+ รายการ/.test(t2) && await o.evaluate(() => STORE.contacts.some(c => c.name === 'คู่ค้าจากไฟล์')) && await o.evaluate(n => STORE.documents.length === n, r1.docs), t2);
 
   // ---- reload keeps session; logout
   await o.reload(); await o.waitForSelector('#authScreen', { state: 'hidden', timeout: 15000 }); await o.waitForTimeout(1500);

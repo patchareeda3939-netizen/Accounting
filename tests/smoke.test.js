@@ -64,6 +64,7 @@ async function createAndSwitch(p, label) {
   const p = await open(browser, 'local.html');
   check('local: runs without a database', await p.evaluate(() => !db && !byId('modeBadge').hidden));
   check('local: greeting has no hard-coded name', (await p.textContent('#homeGreeting')).trim() === 'สวัสดี');
+  check('local: badge says data is kept in this browser', /เก็บข้อมูลในเบราว์เซอร์นี้/.test(await p.textContent('#modeBadge')));
   await visitAllPages(p, 'local');
   await createAndSwitch(p, 'local');
   check('local: no page errors', p.errs.length === 0, p.errs);

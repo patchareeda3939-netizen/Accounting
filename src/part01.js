@@ -90,7 +90,7 @@ async function fbStart() {
   if (!cos.some(function(c) { return c._id === CUR_CO; })) CUR_CO = cos[0]._id;
   try { localStorage.setItem('psm_company', CUR_CO); } catch (e) {}
   COMPANIES = cos; FB_MODE = true;
-  authHide(); fbAvatar(); fbWatchRole();
+  authHide(); fbAvatar(); roWatch(); fbWatchRole();
   if (joined.length) setTimeout(function() { showToast('เข้าร่วมบริษัท ' + joined.join(', ') + ' แล้ว'); }, 600);
   return fbDb(fs, user.uid);
 }
@@ -153,14 +153,37 @@ function fbWatchRole() {
     if (changed && byId('sectionView') && !byId('sectionView').hidden) refreshPageData(); // edit controls depend on the role
   }, function(e) { if (e && e.code === 'permission-denied') removed(); });
 }
+/* ---- Viewer: hide create/edit/delete controls everywhere (firestore.rules block the writes anyway) ---- */
+var RO_TEXT = /^\s*(\+|สร้าง|เพิ่ม|บันทึก|แก้ไข|ลบ|ยกเลิกเอกสาร|ยกเลิกคู่|กู้คืน|รับชำระ|จ่ายชำระ|ถอน|ฝาก|ปรับ|นำเข้า|ล้าง|ล็อก|ปลดล็อก|ทำเครื่องหมาย|ย้อน|เริ่มกระทบยอด|กระทบยอดใหม่|จับคู่|ทำต่อ|โครงการใหม่|ทำซ้ำ|คัดลอกเป็น|แปลงเป็น|อนุมัติ|ปิด Statement|เสร็จ)/;
+var RO_SEL = '#sidebarCreateBtn, .quick-row, .item-remove, .att-x, .att-add, [data-open], [data-bradd], [data-bredit], [data-brdel], [data-bractive], [data-coedit], [data-mbrole], [data-mbdel]';
+var RO_KEEP = '#authScreen *, #accNameSave';
+var RO_DISABLE = '[data-mcdone], [data-mcnote], [data-ocr], [data-ocri]';
+function roApply() {
+  var on = fbReadOnly();
+  document.body.classList.toggle('read-only', on);
+  if (!on) {
+    document.querySelectorAll('.ro-hide').forEach(function(el) { el.classList.remove('ro-hide'); });
+    document.querySelectorAll('[data-ro-dis]').forEach(function(el) { el.disabled = false; delete el.dataset.roDis; });
+    return;
+  }
+  document.querySelectorAll('button, [role="button"], [role="menuitem"], ' + RO_SEL).forEach(function(el) {
+    if (el.matches(RO_KEEP)) return;
+    if (el.matches(RO_SEL) || RO_TEXT.test(el.textContent || '')) el.classList.add('ro-hide');
+  });
+  document.querySelectorAll(RO_DISABLE).forEach(function(el) { if (!el.disabled) { el.disabled = true; el.dataset.roDis = '1'; } });
+}
+var _roObs = null;
+// re-apply whenever anything is rendered (runs before paint, so write buttons never flash)
+function roWatch() { if (_roObs) return; _roObs = new MutationObserver(roApply); _roObs.observe(document.body, { childList: true, subtree: true }); }
 function fbRoleBadge() {
   var el = byId('roleBadge');
   if (!el) { var mb = byId('modeBadge'); if (!mb) return; el = document.createElement('span'); el.id = 'roleBadge'; el.className = 'mode-badge'; mb.parentNode.insertBefore(el, mb); }
   el.hidden = !fbReadOnly(); el.textContent = 'สิทธิ์ดูอย่างเดียว';
+  roApply();
 }
 function fbAvatar() {
   var av = document.querySelector('.topbar .avatar'); if (!av) return;
-  av.textContent = (fbEmail()[0] || 'U').toUpperCase(); av.title = fbEmail();
+  av.textContent = (((FB.user && FB.user.displayName) || fbEmail())[0] || 'U').toUpperCase(); av.title = fbEmail();
   av.setAttribute('role', 'button'); av.tabIndex = 0; av.style.cursor = 'pointer';
   av.onclick = fbOpenAccount; av.onkeydown = function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fbOpenAccount(); } };
   // greet the signed-in user by display name, or by email when no name is set
@@ -168,21 +191,73 @@ function fbAvatar() {
 }
 function fbSignOut() { FB.auth.signOut().then(function() { location.reload(); }); }
 function fbRoleText(uid, role) { return uid && uid === fbPrimaryOwner() ? 'เจ้าของหลัก' : (ROLE_LABEL[role] || role || '-'); }
-function fbOpenAccount() {
+function fbOpenAccount(fresh) {
   var u = FB.user;
-  var body = '<div style="line-height:1.9"><div><span class="muted">อีเมล</span> <b>' + esc(fbEmail()) + '</b> ' + (u.emailVerified ? '<span class="status st-paid">ยืนยันแล้ว</span>' : '<span class="status st-overdue">ยังไม่ยืนยัน</span>') + '</div>' +
+  var body = '<div style="line-height:1.9"><div><span class="muted">อีเมล</span> <b>' + esc(fbEmail()) + '</b> ' + (u.emailVerified ? '<span class="status st-paid" id="accVerified">ยืนยันแล้ว</span>' : '<span class="status st-overdue" id="accVerified">ยังไม่ยืนยัน</span>') + '</div>' +
     '<div><span class="muted">บริษัทปัจจุบัน</span> ' + esc(companyName()) + '</div><div><span class="muted">สิทธิ์ของคุณ</span> ' + esc(fbRoleText(u.uid, CUR_ROLE)) + '</div></div>' +
+    '<div class="field" style="margin:12px 0 0"><label for="accName">ชื่อที่แสดง</label><div style="display:flex;gap:8px"><input id="accName" maxlength="60" value="' + esc(u.displayName || '') + '" placeholder="เช่น สมชาย ใจดี" style="flex:1"><button type="button" class="btn btn-outline" id="accNameSave">บันทึกชื่อ</button></div></div>' +
     (u.emailVerified ? '' : '<div class="banner info" style="margin:10px 0 0">ยืนยันอีเมลเพื่อรับคำเชิญเข้าบริษัทอื่น <button type="button" class="linkish" id="accResend">ส่งอีเมลยืนยันอีกครั้ง</button></div>');
   openModal({ title:'บัญชีผู้ใช้', focus:false, body: body, buttons:[
     { label:'ออกจากระบบ', cls:'btn-outline', left:true, onClick: fbSignOut },
     { label:'จัดการผู้ใช้', onClick: function() { fbOpenMembers(); } },
     { label:'ปิด', cls:'btn-primary', onClick: closeModal }] });
   var rs = byId('accResend'); if (rs) rs.onclick = function() { u.sendEmailVerification().then(function() { showToast('ส่งอีเมลยืนยันแล้ว'); }, function(e) { showToast(fbAuthError(e)); }); };
+  byId('accNameSave').onclick = function() {
+    var v = byId('accName').value.trim(), btn = byId('accNameSave'); btn.disabled = true;
+    u.updateProfile({ displayName: v || null }).then(function() { fbAvatar(); btn.disabled = false; showToast(v ? 'บันทึกชื่อแล้ว' : 'ลบชื่อที่แสดงแล้ว'); }, function(e) { btn.disabled = false; showToast(fbAuthError(e)); });
+  };
+  // the verification link is clicked outside the app: refresh the status instead of asking for a new login
+  if (!fresh && !u.emailVerified) u.reload().then(function() {
+    var nu = FB.auth.currentUser; if (!nu || !nu.emailVerified) return;
+    FB.user = nu;
+    return nu.getIdToken(true).then(function() {
+      if (byId('accVerified')) fbOpenAccount(true);
+      showToast('ยืนยันอีเมลแล้ว');
+      return fbAcceptInvites().then(function(joined) { if (joined.length) showToast('เข้าร่วมบริษัท ' + joined.join(', ') + ' แล้ว'); });
+    });
+  }).catch(function() {});
 }
 
 /* ---- Users & roles of the current company ---- */
 var AUDIT_LABEL = { create:'สร้างบริษัท', join:'เข้าร่วมตามคำเชิญ', role:'เปลี่ยนสิทธิ์', remove:'นำออก', transfer:'โอนสิทธิ์เจ้าของหลัก', period_lock:'ล็อกงวดบัญชี', period_unlock:'ปลดล็อกงวดบัญชี', branch_delete:'ลบสาขา' };
 function fbSaveSettings(id, patch) { var v = fbEncode(patch); return FB.fs.doc('companies/' + CUR_CO + '/settings/' + id).set(v, { mergeFields: Object.keys(v) }); }
+/* ---- File attachments: Firebase Storage (companies/{co}/files/{id}, see storage.rules) ---- */
+var ATT_MAX = 20 * 1024 * 1024;
+var ATT_TYPES = /^(image\/[a-z0-9.+-]+|application\/pdf|application\/json|text\/(plain|csv|markdown))$/;
+var _fbStorageP = null;
+function fbStorage() {
+  if (!_fbStorageP) {
+    _fbStorageP = loadScriptOnce(FB_SDK + 'firebase-storage-compat.js', function() { return !!firebase.storage; }).then(function() {
+      if (!FIREBASE_CONFIG.storageBucket) throw { code: 'no_bucket' };
+      var st = firebase.storage();
+      if (typeof FIREBASE_EMULATOR_HOST !== 'undefined' && FIREBASE_EMULATOR_HOST) st.useEmulator(FIREBASE_EMULATOR_HOST, 9199);
+      return st;
+    });
+    _fbStorageP.catch(function() { _fbStorageP = null; });
+  }
+  return _fbStorageP;
+}
+function attType(f) {
+  if (f.type) return f.type;
+  var ext = (/\.([a-z0-9]+)$/i.exec(f.name || '') || [])[1] || '';
+  return { csv:'text/csv', txt:'text/plain', md:'text/markdown', json:'application/json', pdf:'application/pdf' }[ext.toLowerCase()] || '';
+}
+// same interface as the Claude assets capability: upload(file) -> { id, contentType, sizeBytes } (+ path)
+var FB_ASSETS = {
+  upload: async function(f) {
+    var type = attType(f);
+    if (f.size > ATT_MAX) throw { code: 'too_large' };
+    if (!ATT_TYPES.test(type)) throw { code: 'unsupported_type' };
+    var st = await fbStorage(), id = Date.now().toString(36) + Math.random().toString(36).slice(2, 10), path = 'companies/' + CUR_CO + '/files/' + id;
+    try {
+      var snap = await st.ref(path).put(f, { contentType: type, customMetadata: { uid: FB.user.uid, name: encodeURIComponent(f.name || '') } });
+    } catch (e) {
+      throw { code: e && e.code === 'storage/unauthorized' ? 'not_granted' : e && e.code === 'storage/quota-exceeded' ? 'quota_or_state' : 'storage_off', message: e && e.message };
+    }
+    return { id: id, path: path, contentType: snap.metadata.contentType, sizeBytes: snap.metadata.size };
+  }
+};
+async function fbFileUrl(a) { return (await fbStorage()).ref(a.path).getDownloadURL(); }
 // period lock: settings/company.lockDate + audit entry in one batch
 async function fbSetLockDate(to, action) {
   var fs = FB.fs, co = CUR_CO, b = fs.batch(), ref = fs.collection('companies/' + co + '/audit').doc();

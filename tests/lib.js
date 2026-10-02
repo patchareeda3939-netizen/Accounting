@@ -16,7 +16,7 @@ function distHtml() { return fs.readFileSync(path.join(ROOT, 'dist/index.html'),
 const CONFIG_RE = /^var FIREBASE_CONFIG = (?:null|\{[\s\S]*?\n\});$/m, EMU_RE = /^var FIREBASE_EMULATOR_HOST = [^\n]*;$/m;
 function withConfig(html, mode) {
   if (!CONFIG_RE.test(html) || !EMU_RE.test(html)) throw new Error('dist/index.html: FIREBASE_CONFIG not found (run npm run build)');
-  const cfg = mode === 'emulator' ? "var FIREBASE_CONFIG = {apiKey:'demo-key',authDomain:'" + PROJECT + ".firebaseapp.com',projectId:'" + PROJECT + "',appId:'demo'};" : 'var FIREBASE_CONFIG = null;';
+  const cfg = mode === 'emulator' ? "var FIREBASE_CONFIG = {apiKey:'demo-key',authDomain:'" + PROJECT + ".firebaseapp.com',projectId:'" + PROJECT + "',storageBucket:'" + PROJECT + ".appspot.com',appId:'demo'};" : 'var FIREBASE_CONFIG = null;';
   return html.replace(CONFIG_RE, () => cfg).replace(EMU_RE, () => 'var FIREBASE_EMULATOR_HOST = ' + (mode === 'emulator' ? "'127.0.0.1'" : 'null') + ';');
 }
 
