@@ -105,6 +105,7 @@ Settings → Pages → Source: `main` branch, โฟลเดอร์ `/ (root)
    ครั้งแรก Console จะขอสิทธิ์ให้ Storage อ่าน Firestore ได้ (ใช้ตรวจสมาชิกบริษัท) ให้กด Allow
    (หรือ `npx firebase-tools deploy --only storage --project <project-id>`)
 3. ตรวจว่า `storageBucket` ใน `src/config.js` ตรงกับชื่อ bucket ในหน้า Storage
+   แล้วเปลี่ยน `FIREBASE_STORAGE_ENABLED = true` ใน `src/config.js` และรัน `./build.sh` (ค่าเริ่มต้นเป็น `false` ปุ่มแนบไฟล์จะถูกซ่อน)
 4. (ไม่บังคับ) ถ้าต้องการพรีวิว PDF/ไฟล์ข้อความในหน้าเว็บ ต้องเปิด CORS ของ bucket ด้วย Cloud Shell:
    ```
    echo '[{"origin":["https://<ชื่อผู้ใช้>.github.io"],"method":["GET"],"maxAgeSeconds":3600}]' > cors.json
@@ -112,7 +113,7 @@ Settings → Pages → Source: `main` branch, โฟลเดอร์ `/ (root)
    ```
    ถ้าไม่ตั้ง รูปภาพยังแสดงได้ ไฟล์อื่นจะมีลิงก์ "เปิดไฟล์ในแท็บใหม่" แทน
 
-ถ้ายังไม่เปิด Storage ส่วนอื่นของแอปใช้งานได้ตามปกติ เพียงแนบไฟล์ไม่ได้ (แจ้งว่า "ยังไม่ได้เปิดใช้ Firebase Storage")
+ถ้ายังไม่เปิด Storage (`FIREBASE_STORAGE_ENABLED = false`) ส่วนอื่นของแอปใช้งานได้ตามปกติ ปุ่มแนบไฟล์ถูกซ่อนและแสดงว่ายังไม่ได้เปิดใช้การแนบไฟล์
 
 ### การใช้งาน
 - ผู้ใช้ใหม่สมัครสมาชิกแล้วสร้างบริษัทแรก ผู้สร้างเป็นเจ้าของบริษัท

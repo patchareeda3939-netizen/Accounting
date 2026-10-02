@@ -20,3 +20,6 @@ var FIREBASE_CONFIG = {
 };
 // สำหรับนักพัฒนา: ใส่ '127.0.0.1' เพื่อต่อ Firebase Emulator แทนระบบจริง
 var FIREBASE_EMULATOR_HOST = null;
+// ไฟล์แนบในโหมด Firebase: เปลี่ยนเป็น true หลังเปิด Storage และ Publish storage.rules ใน Firebase Console
+// (ต้องใช้แพ็กเกจ Blaze) ถ้าเป็น false ปุ่มแนบไฟล์จะถูกซ่อน
+var FIREBASE_STORAGE_ENABLED = false;

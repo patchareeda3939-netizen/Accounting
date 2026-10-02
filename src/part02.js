@@ -463,7 +463,7 @@ function openDocForm(typeKey, doc, prefill) {
   form.attachments = ((ex.attachments) || []).slice();
   if (def.group === 'customer' || def.group === 'supplier' || def.group === 'other') html += dimSelectsHTML(ex);
   if (branchesFor(ex.branch).length && (def.group === 'customer' || def.group === 'supplier')) html += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branchesFor(ex.branch)).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
-  html += '<div class="field"><label>ไฟล์แนบ</label><div id="attList" class="att-list"></div><label class="btn btn-outline att-add">📎 แนบไฟล์<input type="file" id="attInput" multiple hidden accept="image/*,application/pdf,.csv,.txt,.json,.md"></label><div class="small muted" id="attMsg">รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB ต่อไฟล์</div></div>';
+  html += '<div class="field"><label>ไฟล์แนบ</label><div id="attList" class="att-list"></div>' + (attEnabled() ? '<label class="btn btn-outline att-add">📎 แนบไฟล์<input type="file" id="attInput" multiple hidden accept="image/*,application/pdf,.csv,.txt,.json,.md"></label><div class="small muted" id="attMsg">รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB ต่อไฟล์</div>' : '<div class="small muted" id="attMsg">ยังไม่ได้เปิดใช้การแนบไฟล์ (ต้องเปิด Firebase Storage)</div>') + '</div>';
 
   if (def.template === 'itemized') {
     html += '<div><div class="items-wrap"><table class="items-table"><thead><tr><th>รายการ</th><th style="width:70px">จำนวน</th><th style="width:100px">ราคา/หน่วย</th><th style="width:100px;text-align:right">รวม</th><th style="width:30px"></th></tr></thead><tbody id="itemsBody"></tbody></table></div>';
@@ -1058,7 +1058,7 @@ if (window.claude && window.claude.use) window.claude.use('assets').then(functio
 // Claude assets in the artifact, Firebase Storage when signed in to Firebase
 async function getAssets() {
   if (ASSETS) return ASSETS;
-  if (FB_MODE) return (ASSETS = FB_ASSETS);
+  if (FB_MODE) return attEnabled() ? (ASSETS = FB_ASSETS) : null;
   try { ASSETS = window.claude && window.claude.use ? await window.claude.use('assets') : null; } catch (e) { ASSETS = null; }
   return ASSETS;
 }
