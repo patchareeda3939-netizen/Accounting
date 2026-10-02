@@ -257,6 +257,8 @@ var FB_ASSETS = {
     return { id: id, path: path, contentType: snap.metadata.contentType, sizeBytes: snap.metadata.size };
   }
 };
+// attachments need Firebase Storage, which is switched on in config.js once it is set up in the console
+function attEnabled() { return !FB_MODE || (typeof FIREBASE_STORAGE_ENABLED !== 'undefined' && FIREBASE_STORAGE_ENABLED === true); }
 async function fbFileUrl(a) { return (await fbStorage()).ref(a.path).getDownloadURL(); }
 // period lock: settings/company.lockDate + audit entry in one batch
 async function fbSetLockDate(to, action) {

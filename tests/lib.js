@@ -13,16 +13,19 @@ const FSTORE = 'http://' + (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:80
 function distHtml() { return fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8'); }
 // tests never talk to the real Firebase project: swap whatever config is built into dist/ for
 // null (browser-storage mode) or the emulator's demo project
-const CONFIG_RE = /^var FIREBASE_CONFIG = (?:null|\{[\s\S]*?\n\});$/m, EMU_RE = /^var FIREBASE_EMULATOR_HOST = [^\n]*;$/m;
-function withConfig(html, mode) {
-  if (!CONFIG_RE.test(html) || !EMU_RE.test(html)) throw new Error('dist/index.html: FIREBASE_CONFIG not found (run npm run build)');
+const CONFIG_RE = /^var FIREBASE_CONFIG = (?:null|\{[\s\S]*?\n\});$/m, EMU_RE = /^var FIREBASE_EMULATOR_HOST = [^\n]*;$/m, STORAGE_RE = /^var FIREBASE_STORAGE_ENABLED = [^\n]*;$/m;
+// opts.storage: attachments switched on (default true in emulator mode, where the Storage emulator runs)
+function withConfig(html, mode, opts) {
+  const storage = mode === 'emulator' && !(opts && opts.storage === false);
+  if (!CONFIG_RE.test(html) || !EMU_RE.test(html) || !STORAGE_RE.test(html)) throw new Error('dist/index.html: FIREBASE_CONFIG not found (run npm run build)');
   const cfg = mode === 'emulator' ? "var FIREBASE_CONFIG = {apiKey:'demo-key',authDomain:'" + PROJECT + ".firebaseapp.com',projectId:'" + PROJECT + "',storageBucket:'" + PROJECT + ".appspot.com',appId:'demo'};" : 'var FIREBASE_CONFIG = null;';
-  return html.replace(CONFIG_RE, () => cfg).replace(EMU_RE, () => 'var FIREBASE_EMULATOR_HOST = ' + (mode === 'emulator' ? "'127.0.0.1'" : 'null') + ';');
+  return html.replace(CONFIG_RE, () => cfg).replace(EMU_RE, () => 'var FIREBASE_EMULATOR_HOST = ' + (mode === 'emulator' ? "'127.0.0.1'" : 'null') + ';')
+    .replace(STORAGE_RE, () => 'var FIREBASE_STORAGE_ENABLED = ' + storage + ';');
 }
 
 // dist/index.html served over http with a config that points to the Firebase emulator
-function startFirebaseApp() {
-  const html = withConfig(distHtml(), 'emulator');
+function startFirebaseApp(opts) {
+  const html = withConfig(distHtml(), 'emulator', opts);
   const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html); });
   return new Promise(r => srv.listen(0, '127.0.0.1', () => r({ srv, url: 'http://127.0.0.1:' + srv.address().port + '/' })));
 }

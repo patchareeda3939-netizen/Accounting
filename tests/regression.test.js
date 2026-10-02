@@ -172,6 +172,20 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   check('record without createdAt is loaded', c13.nosort, c13);
   check('more than 1,000 records are loaded', c13.contacts >= 1050, c13);
 
+  REG('REG-15', 'ยังไม่ได้เปิด Firebase Storage แต่มีปุ่มแนบไฟล์ กดแล้วเจอข้อผิดพลาด');
+  const app2 = await L.startFirebaseApp({ storage: false });
+  const ns = await L.newPage(browser, app2.url, '#auEmail');
+  await ns.fill('#auEmail', 'owner@reg.test'); await ns.fill('#auPw', 'test-only-password'); await ns.click('#authSubmit');
+  await ns.waitForSelector('#authScreen', { state: 'hidden', timeout: 15000 }); await ns.waitForTimeout(1500);
+  await ns.evaluate(() => openDocForm('expense')); await ns.waitForSelector('#attList');
+  const a15 = await ns.evaluate(async () => ({ button: !!document.querySelector('.att-add, #attInput'), msg: (byId('attMsg') || {}).textContent, assets: await getAssets() }));
+  check('attach button hidden while Storage is off', !a15.button && /ยังไม่ได้เปิดใช้การแนบไฟล์/.test(a15.msg) && a15.assets === null, a15);
+  const o15 = await o.evaluate(() => { closeModal(); openDocForm('expense'); return !!document.querySelector('.att-add #attInput'); });
+  check('attach button shown when Storage is on', o15);
+  await o.evaluate(() => closeModal());
+  R.check('REG-15', 'no page errors: storage off', ns.errs.length === 0, ns.errs);
+  app2.srv.close();
+
   for (const [n, pg] of [['owner', o], ['member', mbr], ['keeper', kp2], ['co-owner', co]]) R.check('REG-xx', 'no page errors: ' + n, pg.errs.length === 0, pg.errs);
   await browser.close(); app.srv.close();
   process.exit(R.finish() ? 1 : 0);
