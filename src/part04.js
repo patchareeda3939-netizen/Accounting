@@ -259,17 +259,26 @@ function bsReport(ends, mode) {
   if (mode === 'detail') r = Object.assign(glReport(), { note: r.note });
   return r;
 }
-function glReport() {
-  var lines = allLines().filter(function(l) { return inRange(l.date || '', repRange()); }), o = {};
-  lines.forEach(function(l) { (o[l.code] = o[l.code] || []).push(l); });
-  var rows = [];
-  Object.keys(o).sort().forEach(function(code) {
-    rows.push(G(code + ' ' + accName(code)));
-    var run = 0;
-    o[code].sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); }).forEach(function(l) { run += l.dr - l.cr; rows.push({ doc: l.d._id, c: [fmtDateNum(l.date), dn(l.d), esc(l.d.typeLabel + ' · ' + l.d.party + (l.memo ? ' · ' + l.memo : '')), l.dr ? M(l.dr) : '', l.cr ? M(l.cr) : '', M(run)] }); });
-    rows.push(T(['รวม ' + code, '', '', M(sumF(o[code], function(l) { return l.dr; })), M(sumF(o[code], function(l) { return l.cr; })), M(run)]));
+function glReport(collapse) {
+  var rr = repRange(), o = {}, open = {};
+  allLines().forEach(function(l) {
+    var dt = l.date || '';
+    if (inRange(dt, rr)) (o[l.code] = o[l.code] || []).push(l);
+    else if (dt < rr[0] && /asset|liability|equity/.test(accBaseOf(l.code) || '')) open[l.code] = round2((open[l.code] || 0) + l.dr - l.cr); // ยอดยกมาเฉพาะบัญชีงบดุล
   });
-  return { cols: [['วันที่'],['เลขที่'],['คำอธิบาย'],['เดบิต',1],['เครดิต',1],['ยอดสะสม',1]], rows: rows, note: 'รวมรายการลงบัญชีอัตโนมัติจากเอกสารขาย ซื้อ และการรับ/จ่ายชำระ' };
+  var rows = [];
+  Object.keys(o).concat(Object.keys(open).filter(function(c) { return !o[c] && open[c]; })).sort().forEach(function(code) {
+    var ls = (o[code] || []).sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); }), run = open[code] || 0, det = [];
+    if (open[code]) det.push({ grp: code, c: [fmtDateNum(rr[0]), '', 'ยอดยกมา', '', '', M(run)] });
+    ls.forEach(function(l) { run += l.dr - l.cr; det.push({ grp: code, doc: l.d._id, c: [fmtDateNum(l.date), dn(l.d), esc(l.d.typeLabel + ' · ' + l.d.party + (l.memo ? ' · ' + l.memo : '')), l.dr ? M(l.dr) : '', l.cr ? M(l.cr) : '', M(run)] }); });
+    var dr = M(sumF(ls, function(l) { return l.dr; })), cr = M(sumF(ls, function(l) { return l.cr; }));
+    det.push(Object.assign(T(['รวม ' + code, '', '', dr, cr, M(run)]), { grp: code }));
+    // แบบย่อ: แถวบัญชีแสดงรหัส ชื่อ และยอดคงเหลือ กดที่บัญชีเพื่อดูรายการ
+    rows.push(collapse ? { g: code + ' ' + accName(code), key: code, gc: [code + ' ' + accName(code) + ' (' + ls.length + ' รายการ)', '', '', dr, cr, M(run)] } : G(code + ' ' + accName(code)));
+    rows = rows.concat(det);
+  });
+  return { cols: [['วันที่'],['เลขที่'],['คำอธิบาย'],['เดบิต',1],['เครดิต',1],['ยอดสะสม',1]], rows: rows, collapse: !!collapse,
+    note: 'รวมรายการลงบัญชีอัตโนมัติจากเอกสารขาย ซื้อ และการรับ/จ่ายชำระ' + (collapse ? ' · กดที่บัญชีเพื่อดูรายละเอียด' : '') };
 }
 function tbReport(end) {
   var bal = balancesAt(end), tdr = 0, tcr = 0;
@@ -444,7 +453,7 @@ var RG = {
     });
     return { cols: [['วันที่'],['เลขที่'],['คำอธิบาย'],['ปัญหา']], rows: rows, emptyMsg:'ไม่พบรายการที่ผิดพลาด' };
   },
-  gl: function() { return glReport(); },
+  gl: function() { return glReport(true); },
   glList: function() { return RG.accList(); },
   journal: function() {
     var rows = [], by = {};
@@ -550,12 +559,15 @@ function reportViewData() {
   var sub = r.noPeriod ? 'ข้อมูล ณ ' + fmtDate(todayStr()) : r.asOf ? 'ณ วันที่ ' + fmtDate(end) : (range[0] === '0000-01-01' ? 'ทุกช่วงเวลา' : fmtDate(range[0]) + ' – ' + fmtDate(end));
   var n = r.cols.length;
   var body = r.rows.map(function(x) {
+    if (x.g && x.gc && r.collapse) return '<tr class="group-row gl-acc" tabindex="0" aria-expanded="false" data-gl="' + esc(x.key) + '">' + x.gc.map(function(c, i) { return i === 0 ? '<td colspan="3"><span class="gl-caret">▸</span> ' + esc(c) + '</td>' : i < 3 ? '' : '<td class="r">' + c + '</td>'; }).join('') + '</tr>';
     if (x.g) return '<tr class="group-row"><td colspan="' + n + '">' + esc(x.g) + '</td></tr>';
     var cells = x.t || x.c || x, cls = x.t ? ' class="rep-total"' : x.doc ? ' class="row-link" tabindex="0" data-doc="' + esc(x.doc) + '"' : x.sub ? ' class="rep-sub"' : '';
+    if (r.collapse && x.grp) cls += ' data-grp="' + esc(x.grp) + '" hidden';
     return '<tr' + cls + '>' + cells.map(function(c, i) { return '<td' + (r.cols[i] && r.cols[i][1] ? ' class="r"' : '') + '>' + c + '</td>'; }).join('') + '</tr>';
   }).join('');
   return '<div class="rep-paper"><div class="rep-title"><div class="rep-co">' + esc(companyName()) + '</div><h1>' + esc(REPORT_NAME[id]) + '</h1><div class="small muted">' + sub + '</div></div>' +
     (r.note ? '<div class="banner info">' + esc(r.note) + '</div>' : '') +
+    (r.collapse && r.rows.length ? '<div class="toolbar" style="margin:0 0 8px"><button type="button" class="btn btn-outline btn-sm" data-glall="1">แสดงรายละเอียดทั้งหมด</button><button type="button" class="btn btn-outline btn-sm" data-glall="0">ย่อทั้งหมด</button></div>' : '') +
     '<div class="items-wrap"><table class="data-table rep-table"><thead><tr>' + r.cols.map(function(c) { return '<th' + (c[1] ? ' class="r"' : '') + '>' + esc(c[0]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
     (body || '<tr><td colspan="' + n + '" class="empty-hint">' + (r.emptyMsg || 'ไม่มีข้อมูลในช่วงนี้') + '</td></tr>') + '</tbody></table></div>' +
     '<p class="small muted" style="margin-top:12px">สร้างเมื่อ ' + new Date().toLocaleString('th-TH') + '</p></div>';
@@ -571,7 +583,7 @@ function bindReportView() {
 function strip2(h) { var d = document.createElement('div'); d.innerHTML = String(h); return d.textContent.replace(/ /g, ' ').trim(); }
 async function exportReport() {
   var r = lastReport; if (!r) return;
-  var rows = [r.cols.map(function(c) { return c[0]; })].concat(r.rows.map(function(x) { return x.g ? [x.g] : (x.t || x.c || x).map(strip2); }));
+  var rows = [r.cols.map(function(c) { return c[0]; })].concat(r.rows.map(function(x) { return x.gc ? x.gc.map(strip2) : x.g ? [x.g] : (x.t || x.c || x).map(strip2); }));
   var dl = await getSaver();
   var name = REPORT_NAME[pageState.repId] + '-' + todayStr();
   try {
@@ -585,6 +597,24 @@ async function exportReport() {
     try { await dl.save({ filename: name + '.csv', data: toCsv(rows) }); showToast('ส่งออกเป็น CSV แล้ว'); } catch (e2) { showToast('ส่งออกไม่สำเร็จ ลองอีกครั้ง'); }
   }
 }
+
+// บัญชีแยกประเภทแบบย่อ: กดที่บัญชีเพื่อแสดง/ซ่อนรายการ
+function glToggle(tr, show) {
+  if (show == null) show = tr.getAttribute('aria-expanded') !== 'true';
+  tr.setAttribute('aria-expanded', show ? 'true' : 'false');
+  var c = tr.querySelector('.gl-caret'); if (c) c.textContent = show ? '▾' : '▸';
+  tr.parentNode.querySelectorAll('tr[data-grp="' + tr.dataset.gl + '"]').forEach(function(x) { x.hidden = !show; });
+}
+['click','keydown'].forEach(function(ev) {
+  byId('sectionContent').addEventListener(ev, function(e) {
+    if (ev === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+    var all = e.target.closest('[data-glall]');
+    if (all && ev === 'click') return document.querySelectorAll('tr.gl-acc').forEach(function(tr) { glToggle(tr, all.dataset.glall === '1'); });
+    var tr = e.target.closest('tr.gl-acc'); if (!tr) return;
+    if (ev === 'keydown') e.preventDefault();
+    glToggle(tr);
+  });
+});
 
 /* ---- Other report sub-pages ---- */
 function reportsPlaceholder(title, desc, cta) {

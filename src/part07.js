@@ -151,11 +151,19 @@ function impVal(r, key) { var i = impState.map[key]; return i == null ? '' : Str
 function impNum(v) { v = String(v || '').replace(/[,\s฿]/g, ''); if (/^\(.*\)$/.test(v)) v = '-' + v.slice(1, -1); var n = Number(v); return isFinite(n) ? n : NaN; }
 function impDate(v) {
   v = String(v || '').trim(); if (!v) return '';
+  function ymd(y, mo, d) { // ปีสองหลัก 50–99 = พ.ศ. (69 → 2569), ต่ำกว่านั้น = ค.ศ. (26 → 2026)
+    if (y < 100) y += y >= 50 ? 2500 : 2000;
+    if (y > 2400) y -= 543;
+    var t = new Date(Date.UTC(y, mo - 1, d));
+    if (y < 1900 || y > 2200 || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return '';
+    return t.toISOString().slice(0, 10);
+  }
   var m = v.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (m) { var y = Number(m[1]); if (y > 2400) y -= 543; return y + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0'); }
+  if (m) return ymd(Number(m[1]), Number(m[2]), Number(m[3]));
   m = v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
-  if (m) { var yy = Number(m[3]); if (yy < 100) yy += 2000; if (yy > 2400) yy -= 543; return yy + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
-  var d = new Date(v); return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+  if (m) return ymd(Number(m[3]), Number(m[2]), Number(m[1]));
+  if (/^\d{5}(\.\d+)?$/.test(v)) { var x = new Date(Math.round((Number(v) - 25569) * 864e5)); return ymd(x.getUTCFullYear(), x.getUTCMonth() + 1, x.getUTCDate()); } // เลขวันที่ของ Excel
+  var d = new Date(v); return isNaN(d) ? '' : ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
 // build records to import; each {ok, err, label, rec}
 function buildImport() {
@@ -320,6 +328,11 @@ async function runImportWizard(btn) {
       await addRec(x.coll, rec);
     }
     closeModal(); showToast('นำเข้าแล้ว ' + todo.length + ' รายการ');
+    if (impState.kind === 'journal' && typeof jnEntries === 'function') { // เปิดสมุดรายวันที่รายการล่าสุดอยู่ ดูได้ทุกช่วงวันที่
+      var last = rec.docNo, e = jnEntries().find(function(j) { return j.d.docNo === last; });
+      pageState.jnPeriod = 'all'; pageState.jnQ = ''; pageState.jnIdx = null; if (e) pageState.jnTab = e.j;
+      go('alldocs', 'journals');
+    }
   } catch (e) { err.textContent = 'นำเข้าไม่สำเร็จ: ' + (e.message || e); err.hidden = false; btn.disabled = false; btn.textContent = 'นำเข้า'; }
 }
 

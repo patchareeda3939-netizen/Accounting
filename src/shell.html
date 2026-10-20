@@ -509,6 +509,10 @@
   .rep-title h1 { font-size: 20px; margin: 4px 0; }
   .rep-co { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
   .rep-table tr.rep-total td { font-weight: 700; border-top: 1px solid var(--border-strong); }
+  .rep-table tr.gl-acc { cursor: pointer; }
+  .rep-table tr.gl-acc:hover td, .rep-table tr.gl-acc:focus-visible td { background: var(--bg-active, var(--bg-hover)); color: var(--text); }
+  .rep-table tr.gl-acc td { white-space: nowrap; }
+  .gl-caret { display: inline-block; width: 1em; }
   .rep-table tr.rep-sub td { color: var(--text-secondary); font-size: 12.5px; padding-top: 4px; padding-bottom: 4px; }
   .count-blank { display: inline-block; width: 90px; border-bottom: 1px solid var(--border-strong); height: 1em; }
   .icon-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px; border-radius: 8px; display: inline-flex; }
