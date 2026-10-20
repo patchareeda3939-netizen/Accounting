@@ -12,7 +12,7 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
 
 (async () => {
   const pages = L.localPages();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ env: Object.assign({}, process.env, { LANG: 'C.UTF-8' }) }); // UTF-8 locale so Thai download file names survive
 
   /* ---------- โหมดเก็บข้อมูลในเบราว์เซอร์ (localStorage) ---------- */
   const p = await L.newPage(browser, pages.local);
@@ -136,6 +136,31 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   check('intercompany reconciliation matches both sides', ic.length === 3 && ic.every(t => t === 'ตรงกัน'), ic);
   check('no page errors (branch filter, group reports)', fq.errs.length === 0, fq.errs);
 
+  REG('FEAT-06', 'ส่งออกผังบัญชีบนเว็บปกติ (GitHub Pages) ได้แค่คัดลอกข้อความ ไม่ได้ไฟล์');
+  const cx = await L.newPage(browser, pages.local);
+  await cx.evaluate(async () => { await loadStandardCoa(); }); await cx.waitForTimeout(500);
+  const nAcc = await cx.evaluate(() => STORE.accounts.length);
+  const coaFiles = {};
+  for (const fmt of ['xlsx', 'csv']) {
+    await cx.evaluate(() => openCoaExport()); await cx.waitForSelector('#expFmt');
+    await cx.selectOption('#expFmt', fmt);
+    const [d] = await Promise.all([cx.waitForEvent('download', { timeout: 10000 }), cx.click('#modalFoot >> text=ส่งออก')]);
+    coaFiles[fmt] = await d.path();
+    check(fmt + ': chart of accounts downloads as a file', d.suggestedFilename().endsWith('.' + fmt) && fs.statSync(coaFiles[fmt]).size > 500, d.suggestedFilename());
+    await cx.waitForTimeout(300);
+  }
+  const ci = await L.newPage(browser, pages.local);
+  for (const fmt of ['xlsx', 'csv']) {
+    await ci.evaluate(async () => { for (const a of STORE.accounts.slice()) await delRec('accounts', a._id); }); await ci.waitForTimeout(300);
+    await ci.evaluate(() => openCoaImport()); await ci.waitForSelector('#impFile');
+    await ci.setInputFiles('#impFile', { name: 'coa.' + fmt, mimeType: fmt === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: fs.readFileSync(coaFiles[fmt]) }); await ci.waitForTimeout(1200);
+    const pv = await ci.evaluate(() => ({ n: coaImportRows.length, bad: coaImportRows.filter(r => r.err).map(r => r.code + ':' + r.err) }));
+    await ci.click('#modalFoot >> text=นำเข้า'); await ci.waitForTimeout(1500);
+    const got = await ci.evaluate(() => ({ n: STORE.accounts.length, cash: (STORE.accounts.find(a => a.code === '1110') || {}).name }));
+    check(fmt + ': exported file imports back with every account', pv.n === nAcc && !pv.bad.length && got.n === nAcc && !!got.cash, { nAcc, pv, got });
+  }
+  check('no page errors (chart of accounts export/import)', cx.errs.length === 0 && ci.errs.length === 0, cx.errs.concat(ci.errs));
+
   REG('FEAT-05', 'นำเข้าสมุดรายวัน / GL จากไฟล์ CSV');
   const jq = await L.newPage(browser, pages.local);
   await jq.evaluate(async () => { await loadStandardCoa(); await saveSettings('company', { lockDate: '2026-01-31' }); }); await jq.waitForTimeout(500);
@@ -167,6 +192,33 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   const jr = await jq.evaluate(() => { const js = STORE.documents.filter(d => d.type === 'journalEntry' && d.extra && d.extra.importedJournal); const p = {}; js.forEach(d => postingsOf(d).forEach(l => { p[l.code] = Math.round(((p[l.code] || 0) + l.dr - l.cr) * 100) / 100; })); return { n: js.length, nos: js.map(d => d.docNo).sort(), p, toast: byId('toast').textContent }; });
   check('two journal entries imported, the unnumbered one gets the next JV number', jr.n === 2 && jr.nos.includes('JV-A') && jr.nos.some(n => /^JV-\d{6}-\d{3}$/.test(n)) && /นำเข้าแล้ว 2 รายการ/.test(jr.toast), jr);
   check('imported entries post to the ledger', jr.p['5290'] === 500 && jr.p['2110'] === -500 && jr.p['1120'] === 1200 && jr.p['1110'] === -1200, jr.p);
+  REG('REG-16', 'นำเข้า GL แล้วไม่เห็นในหน้าสมุดรายวัน (กรองแค่เดือนนี้ / ปี 2 หลักกลายเป็น 2069)');
+  const jv = await jq.evaluate(() => ({ child: route.child, period: pageState.jnPeriod, tab: pageState.jnTab, txt: byId('pageData').textContent }));
+  check('after import the journals page opens on all dates with the imported entry', jv.child === 'journals' && jv.period === 'all' && jv.tab === 'general' && /JV-\d{6}-\d{3}/.test(jv.txt) && !/ไม่มีรายการ/.test(jv.txt), { child: jv.child, period: jv.period, tab: jv.tab });
+  const hint = await jq.evaluate(() => { jnSet('jnQ', 'ไม่มีคำนี้แน่นอน'); return byId('pageData').textContent; });
+  check('empty journal tab says entries exist in other dates', /มี 2 รายการในช่วงวันที่อื่น/.test(hint) && /ดูทั้งหมด/.test(hint), hint.slice(0, 200));
+  await jq.evaluate(() => jnSet('jnQ', ''));
+  const dts = await jq.evaluate(() => ['30/09/69', '30/09/2569', '30/09/26', '2026-09-30', '2569-09-30', '45930', '31/02/2569', '13/13/2569', '1/10/2026'].map(impDate));
+  check('import dates: 2-digit Buddhist year, Excel serial, invalid dates rejected', JSON.stringify(dts) === JSON.stringify(['2026-09-30', '2026-09-30', '2026-09-30', '2026-09-30', '2026-09-30', '2025-09-30', '', '', '2026-10-01']), dts);
+  REG('FEAT-07', 'บัญชีแยกประเภททั่วไป: แสดงรหัส ชื่อบัญชี ยอดคงเหลือ กดที่บัญชีจึงแสดงรายการ');
+  await jq.evaluate(() => { pageState.repPeriod = 'all'; pageState.repBranch = ''; openReport('gl'); }); await jq.waitForSelector('tr.gl-acc');
+  const glView = () => jq.evaluate(() => [...document.querySelectorAll('tr.gl-acc')].map(tr => ({ acc: tr.dataset.gl, txt: tr.textContent, open: tr.getAttribute('aria-expanded'), shown: [...document.querySelectorAll('tr[data-grp="' + tr.dataset.gl + '"]')].filter(x => !x.hidden).length, rows: document.querySelectorAll('tr[data-grp="' + tr.dataset.gl + '"]').length })));
+  let g7 = await glView(); const a2110 = g7.find(x => x.acc === '2110') || {};
+  check('accounts start collapsed: code, name and balance only', g7.length >= 4 && g7.every(x => x.shown === 0 && x.rows >= 2 && x.open === 'false') && /2110/.test(a2110.txt) && /500\.00/.test(a2110.txt), g7);
+  await jq.click('tr.gl-acc[data-gl="2110"]'); g7 = await glView();
+  check('clicking an account shows its entries; others stay collapsed', g7.find(x => x.acc === '2110').shown === g7.find(x => x.acc === '2110').rows && g7.filter(x => x.acc !== '2110').every(x => x.shown === 0), g7);
+  await jq.click('tr.gl-acc[data-gl="2110"]');
+  check('clicking again hides them', (await glView()).every(x => x.shown === 0));
+  await jq.click('[data-glall="1"]');
+  check('show all expands every account', (await glView()).every(x => x.shown === x.rows));
+  await jq.evaluate(() => { pageState.repPeriod = 'custom'; pageState.pFrom = '2026-10-01'; pageState.pTo = '2026-10-31'; refreshPageData(); }); await jq.waitForSelector('tr.gl-acc');
+  g7 = await glView();
+  const o2110 = g7.find(x => x.acc === '2110') || {};
+  check('balance-sheet account without entries in the period shows its brought-forward balance', /ยอดยกมา|500\.00/.test(o2110.txt || '') && !g7.some(x => x.acc === '5290'), g7);
+  const [gdl] = await Promise.all([jq.waitForEvent('download', { timeout: 10000 }), jq.click('#repExport')]);
+  check('export still contains the entries', gdl.suggestedFilename().endsWith('.xlsx'));
+  await jq.evaluate(() => { pageState.repPeriod = 'year'; });
+
   await jq.evaluate(() => { go('settings', 'import'); openImportWizard('journal'); });
   await jq.setInputFiles('#impWFile', { name: 'gl.csv', mimeType: 'text/csv', buffer: Buffer.from(gl) }); await jq.waitForSelector('#impPrev .banner');
   check('importing the same file again skips numbers that already exist', /เลขที่ซ้ำ/.test(await jq.evaluate(() => impState.built.find(x => x.rec.docNo === 'JV-A').err)));

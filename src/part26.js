@@ -50,7 +50,11 @@ function jnData() {
     '<div class="iv-filters"><div class="field"><span class="iv-lbl">ช่วงวันที่</span>' + sel('jnPeriod', [['month','เดือนนี้'],['quarter','ไตรมาสนี้'],['year','ปีนี้'],['last12','12 เดือนที่ผ่านมา'],['all','ทั้งหมด']]) + '</div>' +
     '<label class="coa-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input type="search" value="' + esc(pageState.jnQ) + '" placeholder="ค้นหาเลขสมุด เลขที่เอกสาร คู่ค้า" onchange="jnSet(\'jnQ\',this.value)"></label>' +
     (list.length ? '<div class="field"><span class="iv-lbl">ไปที่รายการ</span><select class="coa-select" onchange="pageState.jnIdx=Number(this.value);refreshPageData()">' + list.map(function(e, i) { return '<option value="' + i + '">' + esc(e.no + ' · ' + (e.d.docNo || '')) + '</option>'; }).join('') + '</select></div>' : '') + '</div>';
-  if (!list.length) return h + '<div class="yc-card adj-empty"><b>ไม่มีรายการ</b><div>ไม่มีรายการใน' + esc(cur[1]) + 'ในช่วงเวลานี้</div></div>';
+  if (!list.length) {
+    var other = jnEntries().filter(function(e) { return e.j === pageState.jnTab; }).length; // รายการที่อยู่นอกช่วงวันที่/คำค้นที่เลือก
+    return h + '<div class="yc-card adj-empty"><b>ไม่มีรายการ</b><div>ไม่มีรายการใน' + esc(cur[1]) + 'ในช่วงเวลานี้</div>' +
+      (other ? '<div style="margin-top:10px">มี ' + other + ' รายการในช่วงวันที่อื่น <button type="button" class="btn btn-outline btn-sm" onclick="pageState.jnQ=\'\';jnSet(\'jnPeriod\',\'all\')">ดูทั้งหมด</button></div>' : '') + '</div>';
+  }
   var i = pageState.jnIdx == null || pageState.jnIdx >= list.length ? list.length - 1 : Math.max(0, pageState.jnIdx); pageState.jnIdx = i;
   h = h.replace('<option value="' + i + '">', '<option value="' + i + '" selected>');
   var e = list[i], dr = 0, cr = 0;
