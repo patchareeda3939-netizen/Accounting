@@ -21,7 +21,7 @@ function toggleCoMenu() {
   if (!m) { m = document.createElement('div'); m.id = 'coMenu'; m.className = 'co-menu'; m.addEventListener('click', function(e) { e.stopPropagation(); }); document.body.appendChild(m); }
   if (!m.hidden && m.innerHTML) { m.hidden = true; return; }
   var r = byId('companyPill').getBoundingClientRect();
-  m.style.left = Math.max(8, r.left) + 'px'; m.style.top = (r.bottom + 6) + 'px';
+  m.style.left = 'auto'; m.style.right = Math.max(8, window.innerWidth - r.right) + 'px'; m.style.top = (r.bottom + 6) + 'px';
   m.innerHTML = '<div class="co-menu-h">บริษัทของคุณ</div>' + coList().map(function(c) { return '<button type="button" data-cosw="' + esc(c._id) + '" class="' + (c._id === CUR_CO ? 'on' : '') + '">' + (c._id === CUR_CO ? '✓ ' : '') + esc(c._id === CUR_CO ? companyName() : c.name) + (c.taxId ? '<small>' + esc(c.taxId) + '</small>' : '') + '</button>'; }).join('') +
     '<hr><button type="button" data-conew>+ เพิ่มบริษัทใหม่</button><button type="button" data-coset>ตั้งค่าบริษัทและสาขา</button>' +
     (FB_MODE ? '<button type="button" data-cousers>จัดการผู้ใช้</button><hr><button type="button" data-coout>ออกจากระบบ <small>' + esc(fbEmail()) + '</small></button>' : '');
@@ -32,7 +32,7 @@ function toggleCoMenu() {
   if (FB_MODE) { m.querySelector('[data-cousers]').onclick = function() { m.hidden = true; fbOpenMembers(); }; m.querySelector('[data-coout]').onclick = fbSignOut; }
 }
 function openNewCompany() {
-  var body = '<p class="small muted" style="margin:0">แต่ละบริษัทมีข้อมูลแยกกันทั้งหมด (เอกสาร ผังบัญชี ผู้ติดต่อ สินค้า ภาษี และการตั้งค่า) สลับบริษัทได้จากชื่อบริษัทมุมซ้ายบน</p>' +
+  var body = '<p class="small muted" style="margin:0">แต่ละบริษัทมีข้อมูลแยกกันทั้งหมด (เอกสาร ผังบัญชี ผู้ติดต่อ สินค้า ภาษี และการตั้งค่า) สลับบริษัทได้จากชื่อบริษัทมุมขวาบน</p>' +
     '<div class="field"><label for="ncName">ชื่อบริษัท <b class="neg-text">*</b></label><input id="ncName" placeholder="เช่น บริษัท ตัวอย่าง จำกัด"></div>' +
     '<div class="grid-2"><div class="field"><label for="ncTax">เลขประจำตัวผู้เสียภาษี</label><input id="ncTax" maxlength="13" inputmode="numeric"></div><div class="field"><label for="ncBranch">สาขา</label><input id="ncBranch" value="สำนักงานใหญ่"></div></div>' +
     '<div class="field"><label for="ncAddr">ที่อยู่ตามกฎหมาย</label><textarea id="ncAddr" rows="2"></textarea></div>' +

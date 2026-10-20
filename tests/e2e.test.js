@@ -305,6 +305,11 @@ async function verify(email) {
   const o2 = await o.evaluate(() => ({ co: CUR_CO, docs: STORE.documents.length, cos: coList().map(c => c.name), role: CUR_ROLE }));
   ok('second company created and isolated', o2.co !== coId && o2.docs === 0 && o2.cos.length === 2 && o2.role === 'owner', o2);
   ok('editor does not see owner\'s second company', (await e.evaluate(() => coList().length)) === 1);
+  // group reports read the other company through Firestore (members only)
+  await o.evaluate(() => { pageState.repPeriod = 'all'; openReport('grpTB'); }); await o.waitForTimeout(3000);
+  const gtb = await o.evaluate(() => ({ cols: lastReport.cols.map(c => c[0]), note: lastReport.note || '', rows: lastReport.rows.length }));
+  ok('group trial balance loads both companies from Firestore', gtb.cols.length === 5 && gtb.cols.includes('ชื่อใหม่') && gtb.cols.includes('บริษัทที่สอง') && !/โหลดไม่สำเร็จ/.test(gtb.note) && gtb.rows > 1, gtb);
+  await o.evaluate(() => go('home'));
   // ---- restore the first company's backup into the second one
   async function restore(file) {
     await o.evaluate(() => { closeModal(); openRestore(); }); await o.setInputFiles('#rsFile', file); await o.waitForSelector('#rsInfo .banner');
