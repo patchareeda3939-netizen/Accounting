@@ -89,10 +89,11 @@ function openFeedback() {
 STORE.feedback = STORE.feedback || [];
 function openImportHub() {
   openModal({ title:'นำเข้าข้อมูล', focus:false, body: '<p class="small muted" style="margin:0">เลือกข้อมูลที่ต้องการนำเข้า</p><div class="toolbar" style="flex-direction:column;align-items:stretch">' +
-    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
+    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impJournal">สมุดรายวัน / GL (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
     buttons:[{ label:'ปิด', onClick: closeModal }], onMount: function() {
       byId('impCoa').addEventListener('click', function() { go('accounting', 'coa'); openCoaImport(); });
       byId('impBackup').addEventListener('click', openRestore);
+      byId('impJournal').addEventListener('click', function() { closeModal(); go('settings', 'import'); openImportWizard('journal'); });
     } });
 }
 // branches first: restored documents may refer to them
@@ -186,8 +187,7 @@ applyCompany();
 /* ---- Company settings page ---- */
 var CO_SECTIONS = [
   ['ข้อมูลบริษัท', 'ข้อมูลนี้อาจนำไปใช้ในการเรียกเก็บเงินได้', [['name','ชื่อ'],['address','ที่อยู่','area'],['email','อีเมล','email'],['phone','โทรศัพท์'],['website','เว็บไซต์'],['industry','อุตสาหกรรม','select',['ค้าปลีก','ค้าส่ง','การผลิต','ก่อสร้าง','การให้บริการเช่าและการรับจ้าง (ไม่ใช่อสังหาริมทรัพย์)','บริการวิชาชีพ (บัญชี กฎหมาย ที่ปรึกษา)','ร้านอาหารและเครื่องดื่ม','ขนส่งและโลจิสติกส์','เทคโนโลยีสารสนเทศ','อสังหาริมทรัพย์','อื่น ๆ']]]],
-  ['ข้อมูลทางกฎหมาย', 'นี่คือข้อมูลที่ธุรกิจของคุณใช้เพื่อวัตถุประสงค์ด้านภาษี', [['legalName','ชื่อธุรกิจจดทะเบียน'],['taxId','เลขประจำตัวผู้เสียภาษี (TIN)'],['branch','สาขา'],['businessType','ประเภทธุรกิจ','select',['บุคคลธรรมดา','ห้างหุ้นส่วนสามัญ','ห้างหุ้นส่วนจำกัด','บริษัทจำกัด','บริษัทมหาชนจำกัด','มูลนิธิ/สมาคม']],['legalAddress','ที่อยู่ตามกฎหมาย','area'],['vatRegistered','จดทะเบียนภาษีมูลค่าเพิ่ม','select',[['yes','จด VAT'],['no','ไม่ได้จด VAT']]],['fiscalStart','เดือนเริ่มต้นรอบบัญชี','select',['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map(function(m, i) { return [String(i + 1), m]; })]]],
-  ['ข้อมูลติดต่อลูกค้า', 'นี่คือวิธีที่ลูกค้าติดต่อกับคุณ', [['custEmail','อีเมลลูกค้า','email'],['custPhone','โทรศัพท์ลูกค้า'],['custAddress','ที่อยู่ลูกค้า','area']]]
+  ['ข้อมูลทางกฎหมาย', 'นี่คือข้อมูลที่ธุรกิจของคุณใช้เพื่อวัตถุประสงค์ด้านภาษี', [['legalName','ชื่อธุรกิจจดทะเบียน'],['taxId','เลขประจำตัวผู้เสียภาษี (TIN)'],['branch','สาขา'],['businessType','ประเภทธุรกิจ','select',['บุคคลธรรมดา','ห้างหุ้นส่วนสามัญ','ห้างหุ้นส่วนจำกัด','บริษัทจำกัด','บริษัทมหาชนจำกัด','มูลนิธิ/สมาคม']],['legalAddress','ที่อยู่ตามกฎหมาย','area'],['vatRegistered','จดทะเบียนภาษีมูลค่าเพิ่ม','select',[['yes','จด VAT'],['no','ไม่ได้จด VAT']]],['fiscalStart','เดือนเริ่มต้นรอบบัญชี','select',['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map(function(m, i) { return [String(i + 1), m]; })]]]
 ];
 var coEditing = null;
 function coVal(f) {

@@ -170,7 +170,7 @@ async function verify(email) {
   await e.evaluate(() => go('settings', 'company')); await e.waitForTimeout(800);
   const eUi = await e.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
   ok('editor: legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)), eUi);
-  ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'custPhone', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
+  ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
   // ---- branches: editor adds/edits/deactivates; branch with history cannot be deleted by editor
   const addBranchUi = async (pg, code, name) => { await pg.click('[data-bradd]'); await pg.fill('#brCode', code); await pg.fill('#brName', name); await pg.fill('#brAddr', 'ที่อยู่ ' + name); await pg.click('#modalFoot >> text=บันทึก'); await pg.waitForTimeout(1200); };
   await addBranchUi(e, '00001', 'สาขาหนึ่ง'); await addBranchUi(e, '00002', 'สาขาสอง');
@@ -261,6 +261,12 @@ async function verify(email) {
   ok('new primary sees transfer in audit log', (await e.$$eval('#mbAudit tbody tr', rs => rs.map(r => r.textContent))).some(t => t.includes('โอนสิทธิ์เจ้าของหลัก') && t.includes('owner@x.com')));
   ok('new primary sees transfer buttons', (await e.$$('[data-mbxfer]')).length >= 1);
   await e.evaluate(() => closeModal());
+
+  // ---- journal / GL import goes through the Firestore rules like any other entry
+  await e.evaluate(() => { closeModal(); go('settings', 'import'); openImportWizard('journal'); });
+  await e.setInputFiles('#impWFile', { name: 'gl.csv', mimeType: 'text/csv', buffer: Buffer.from('เลขที่รายการ,วันที่,คำอธิบายรายการ,รหัสบัญชี,เดบิต,เครดิต\nGL-E2E,' + new Date().toISOString().slice(0, 10) + ',นำเข้าทดสอบ,1120,750,\nGL-E2E,' + new Date().toISOString().slice(0, 10) + ',นำเข้าทดสอบ,1110,,750\n') });
+  await e.waitForSelector('#impPrev .banner'); await e.click('#modalFoot >> text=นำเข้า'); await e.waitForTimeout(1500);
+  ok('journal import saves to Firestore', await e.evaluate(() => { const d = STORE.documents.find(x => x.docNo === 'GL-E2E'); return !!d && d.type === 'journalEntry' && d.items.length === 2 && d.total === 750; }));
 
   // ---- attachments in Firebase mode (Firebase Storage + storage.rules)
   const attDir = path.join(TMP, 'att'); fs.mkdirSync(attDir, { recursive: true });

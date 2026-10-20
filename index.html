@@ -5043,10 +5043,11 @@ function openFeedback() {
 STORE.feedback = STORE.feedback || [];
 function openImportHub() {
   openModal({ title:'นำเข้าข้อมูล', focus:false, body: '<p class="small muted" style="margin:0">เลือกข้อมูลที่ต้องการนำเข้า</p><div class="toolbar" style="flex-direction:column;align-items:stretch">' +
-    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
+    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impJournal">สมุดรายวัน / GL (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
     buttons:[{ label:'ปิด', onClick: closeModal }], onMount: function() {
       byId('impCoa').addEventListener('click', function() { go('accounting', 'coa'); openCoaImport(); });
       byId('impBackup').addEventListener('click', openRestore);
+      byId('impJournal').addEventListener('click', function() { closeModal(); go('settings', 'import'); openImportWizard('journal'); });
     } });
 }
 // branches first: restored documents may refer to them
@@ -5140,8 +5141,7 @@ applyCompany();
 /* ---- Company settings page ---- */
 var CO_SECTIONS = [
   ['ข้อมูลบริษัท', 'ข้อมูลนี้อาจนำไปใช้ในการเรียกเก็บเงินได้', [['name','ชื่อ'],['address','ที่อยู่','area'],['email','อีเมล','email'],['phone','โทรศัพท์'],['website','เว็บไซต์'],['industry','อุตสาหกรรม','select',['ค้าปลีก','ค้าส่ง','การผลิต','ก่อสร้าง','การให้บริการเช่าและการรับจ้าง (ไม่ใช่อสังหาริมทรัพย์)','บริการวิชาชีพ (บัญชี กฎหมาย ที่ปรึกษา)','ร้านอาหารและเครื่องดื่ม','ขนส่งและโลจิสติกส์','เทคโนโลยีสารสนเทศ','อสังหาริมทรัพย์','อื่น ๆ']]]],
-  ['ข้อมูลทางกฎหมาย', 'นี่คือข้อมูลที่ธุรกิจของคุณใช้เพื่อวัตถุประสงค์ด้านภาษี', [['legalName','ชื่อธุรกิจจดทะเบียน'],['taxId','เลขประจำตัวผู้เสียภาษี (TIN)'],['branch','สาขา'],['businessType','ประเภทธุรกิจ','select',['บุคคลธรรมดา','ห้างหุ้นส่วนสามัญ','ห้างหุ้นส่วนจำกัด','บริษัทจำกัด','บริษัทมหาชนจำกัด','มูลนิธิ/สมาคม']],['legalAddress','ที่อยู่ตามกฎหมาย','area'],['vatRegistered','จดทะเบียนภาษีมูลค่าเพิ่ม','select',[['yes','จด VAT'],['no','ไม่ได้จด VAT']]],['fiscalStart','เดือนเริ่มต้นรอบบัญชี','select',['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map(function(m, i) { return [String(i + 1), m]; })]]],
-  ['ข้อมูลติดต่อลูกค้า', 'นี่คือวิธีที่ลูกค้าติดต่อกับคุณ', [['custEmail','อีเมลลูกค้า','email'],['custPhone','โทรศัพท์ลูกค้า'],['custAddress','ที่อยู่ลูกค้า','area']]]
+  ['ข้อมูลทางกฎหมาย', 'นี่คือข้อมูลที่ธุรกิจของคุณใช้เพื่อวัตถุประสงค์ด้านภาษี', [['legalName','ชื่อธุรกิจจดทะเบียน'],['taxId','เลขประจำตัวผู้เสียภาษี (TIN)'],['branch','สาขา'],['businessType','ประเภทธุรกิจ','select',['บุคคลธรรมดา','ห้างหุ้นส่วนสามัญ','ห้างหุ้นส่วนจำกัด','บริษัทจำกัด','บริษัทมหาชนจำกัด','มูลนิธิ/สมาคม']],['legalAddress','ที่อยู่ตามกฎหมาย','area'],['vatRegistered','จดทะเบียนภาษีมูลค่าเพิ่ม','select',[['yes','จด VAT'],['no','ไม่ได้จด VAT']]],['fiscalStart','เดือนเริ่มต้นรอบบัญชี','select',['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'].map(function(m, i) { return [String(i + 1), m]; })]]]
 ];
 var coEditing = null;
 function coVal(f) {
@@ -5472,7 +5472,8 @@ var IMP_ICONS = {
   invoices: '<path d="M14 8h14l8 8v24H14z"/><rect x="18" y="20" width="14" height="14"/><path d="M18 25h14M18 30h14M24 20v14"/>',
   creditMemos: '<path d="M14 8h14l8 8v24H14z"/><rect x="18" y="13" width="5" height="5"/><path d="M18 24h14M18 29h14M18 34h10M25 24v10"/>',
   salesReceipts: '<path d="M12 8h20v32l-3-2-3 2-3-2-3 2-3-2-3 2-2-2z"/><path d="M16 16h12M16 22h12M16 28h8"/><path d="M34 12h4v26"/>',
-  bills: '<rect x="12" y="8" width="24" height="32" rx="2"/><path d="M17 15h14M17 21h14M17 27h14M17 33h10M20 12v26"/>'
+  bills: '<rect x="12" y="8" width="24" height="32" rx="2"/><path d="M17 15h14M17 21h14M17 27h14M17 33h10M20 12v26"/>',
+  journal: '<path d="M12 8h22a2 2 0 0 1 2 2v30H14a2 2 0 0 1-2-2z"/><path d="M24 8v32M16 16h5M16 22h5M28 16h5M28 22h5M16 30h17"/>'
 };
 var IMP_KINDS = [
   { key:'bank', label:'Bank Data', th:'ข้อมูลธนาคาร' },
@@ -5483,7 +5484,8 @@ var IMP_KINDS = [
   { key:'invoices', label:'Invoices', th:'ใบแจ้งหนี้', doc:'invoice' },
   { key:'creditMemos', label:'Credit Memos', th:'ใบลดหนี้', doc:'creditNote' },
   { key:'salesReceipts', label:'Sales Receipts', th:'ใบเสร็จรับเงิน', doc:'receipt' },
-  { key:'bills', label:'Bills', th:'บิลซื้อ', doc:'bill' }
+  { key:'bills', label:'Bills', th:'บิลซื้อ', doc:'bill' },
+  { key:'journal', label:'Journal Entries (GL)', th:'สมุดรายวัน / GL' }
 ];
 var DOC_IMP_FIELDS = [
   { key:'docNo', label:'เลขที่เอกสาร', syn:['เลขที่','no','number','invoice no','doc no','ref no','bill no','receipt no','memo no','credit memo no','sales receipt no','เลขที่บิล','เลขที่ใบแจ้งหนี้','เลขที่ใบเสร็จ'] },
@@ -5510,6 +5512,18 @@ var IMP_FIELDS = {
   customers: CONTACT_FIELDS.filter(function(f) { return f.key !== 'kind'; }).map(function(f) { return { key:f.key, label:f.label, required:f.required, syn:{ name:['customer','ชื่อลูกค้า','display name','company'], taxId:['tax id','เลขผู้เสียภาษี','เลขประจำตัวผู้เสียภาษี'], branch:['branch'], phone:['phone','เบอร์โทร','mobile'], email:['email','e-mail'], address:['address','billing address'], entity:['entity','ประเภท'] }[f.key] || [] }; }),
   products: PRODUCT_FIELDS.map(function(f) { return { key:f.key, label:f.label, required:f.required, syn:{ name:['product/service name','product','service','ชื่อสินค้า','item name'], sku:['sku','รหัส','code'], kind:['type','ประเภท'], unit:['unit','หน่วย'], price:['sales price','price','rate','ราคาขาย'], cost:['purchase cost','cost','ต้นทุน'], openingQty:['qty on hand','quantity','คงเหลือ','ยอดยกมา'], reorderPoint:['reorder point'] }[f.key] || [] }; })
 };
+// general ledger / journal export: one row per posting line; rows with the same entry number become one journal entry
+IMP_FIELDS.journal = [
+  { key:'docNo', label:'เลขที่รายการ', syn:['journal no','entry no','jv','jv no','voucher','voucher no','เลขที่','เลขที่ใบสำคัญ','เลขที่สมุดรายวัน','no','num','number','ref'] },
+  { key:'date', label:'วันที่', required:true, syn:['date','วันที่รายการ','txn date','posting date','วันที่ลงบัญชี'] },
+  { key:'desc', label:'คำอธิบายรายการ', syn:['description','memo','รายละเอียด','คำอธิบาย','narration','particulars'] },
+  { key:'account', label:'รหัสบัญชี', required:true, syn:['account','account code','acct','gl account','บัญชี','เลขที่บัญชี','ชื่อบัญชี','account name'] },
+  { key:'debit', label:'เดบิต', syn:['debit','dr','debit amount','เดบิท'] },
+  { key:'credit', label:'เครดิต', syn:['credit','cr','credit amount','เครดิท'] },
+  { key:'amount', label:'จำนวนเงิน (+เดบิต / −เครดิต)', syn:['amount','จำนวนเงิน','ยอดเงิน'] },
+  { key:'branch', label:'รหัสสาขา', syn:['branch','สาขา','branch code'] },
+  { key:'note', label:'หมายเหตุ', syn:['note','remark','หมายเหตุ'] }
+];
 IMP_FIELDS.vendors = IMP_FIELDS.customers.map(function(f) { return f.key === 'name' ? Object.assign({}, f, { syn:['vendor','supplier','ผู้ขาย','ชื่อผู้ขาย','display name','company'] }) : f; });
 ['invoices','creditMemos','salesReceipts','bills'].forEach(function(k) { IMP_FIELDS[k] = DOC_IMP_FIELDS; });
 
@@ -5543,6 +5557,7 @@ function impTemplateCsv(kind) {
     products: ['บริการที่ปรึกษา,SV-01,service,ชั่วโมง,1500,0,0,0']
   }[kind] || ['INV-0001,2026-09-01,บริษัท ตัวอย่าง จำกัด,2026-09-30,ค่าบริการ,1,1000,,7,4120,'];
   if (kind === 'vendors') ex = ['ร้าน ตัวอย่าง,company,0105561234567,สำนักงานใหญ่,021234567,s@example.com,นนทบุรี'];
+  if (kind === 'journal') ex = ['JV-0001,2026-09-30,บันทึกค่าใช้จ่ายค้างจ่าย,5290,500,,,,', 'JV-0001,2026-09-30,บันทึกค่าใช้จ่ายค้างจ่าย,2110,,500,,,', 'JV-0002,2026-09-30,โอนเงินสดเข้าบัญชีธนาคาร,1120,1000,,,,', 'JV-0002,2026-09-30,โอนเงินสดเข้าบัญชีธนาคาร,1110,,1000,,,'];
   return '﻿' + f.map(function(x) { return x.label; }).join(',') + '\n' + ex.join('\n') + '\n';
 }
 async function downloadTemplate(kind) {
@@ -5563,6 +5578,7 @@ function openImportWizard(kind) {
   if (meta.doc) extra = '<div class="grid-2"><div class="field"><label for="impVatMode">ราคาในไฟล์</label><select id="impVatMode"><option value="exclusive">ยังไม่รวม VAT</option><option value="inclusive">รวม VAT แล้ว</option></select></div>' +
     '<div class="field"><label for="impDefAcc">บัญชีเริ่มต้น (ถ้าไฟล์ไม่ระบุ)</label><select id="impDefAcc"><option value="">— ค่าเริ่มต้นของระบบ —</option>' + accOpts(DOC_TYPES[meta.doc].group === 'customer' ? 'income' : 'expense') + '</select></div></div>' +
     '<p class="small muted" style="margin:0">แถวที่มีเลขที่เอกสารเดียวกันจะรวมเป็นเอกสารเดียวหลายรายการ ถ้าไม่ระบุเลขที่ ระบบจะออกเลขให้อัตโนมัติ</p>';
+  if (kind === 'journal') extra = '<p class="small muted" style="margin:0">1 แถว = 1 บรรทัดบัญชี แถวที่มีเลขที่รายการเดียวกันรวมเป็นสมุดรายวัน 1 รายการ (ถ้าไม่มีเลขที่ ใช้วันที่ + คำอธิบายเดียวกัน) รหัสบัญชีต้องมีในผังบัญชีแล้ว และเดบิตต้องเท่ากับเครดิตทุกรายการ</p>';
   var body = '<div class="imp-steps"><span class="on">1 อัปโหลด</span><span>2 จับคู่คอลัมน์</span><span>3 ตรวจสอบและนำเข้า</span></div>' +
     '<div class="field"><label for="impWFile">ไฟล์ CSV หรือ Excel (.xlsx)</label><input id="impWFile" type="file" accept=".csv,.txt,.xlsx,.xls"></div>' +
     '<div class="small"><button type="button" class="linkish" id="impTpl">ดาวน์โหลดไฟล์ตัวอย่าง (CSV)</button></div>' + extra +
@@ -5641,6 +5657,7 @@ function buildImport() {
     // bank account override for posting
     return out;
   }
+  if (k === 'journal') return buildJournalImport();
   // documents
   var type = meta.doc, def = DOC_TYPES[type], mode = (byId('impVatMode') || {}).value || 'exclusive', defAcc = (byId('impDefAcc') || {}).value || '';
   var groups = [], byNo = {};
@@ -5678,14 +5695,74 @@ function buildImport() {
   return out;
 }
 function renderImpPrev() {
+  renderImpPrevBody();
+  var b = byId('impJnCsv'); if (b) b.onclick = downloadJournalPreview;
+}
+function renderImpPrevBody() {
   var el = byId('impPrev'); if (!el) return;
   var fields = IMP_FIELDS[impState.kind], miss = fields.filter(function(f) { return f.required && impState.map[f.key] == null; });
   if (impState.kind === 'bank' && impState.map.amount == null && impState.map.deposit == null && impState.map.withdraw == null) miss.push({ label:'จำนวนเงิน' });
+  if (impState.kind === 'journal' && impState.map.amount == null && impState.map.debit == null && impState.map.credit == null) miss.push({ label:'เดบิต/เครดิต หรือ จำนวนเงิน' });
   if (miss.length) { el.innerHTML = '<div class="banner bad">ยังไม่ได้จับคู่: ' + miss.map(function(m) { return esc(m.label); }).join(', ') + '</div>'; impState.built = []; return; }
   var list = impState.built = buildImport(), ok = list.filter(function(x) { return x.ok; }).length;
   el.innerHTML = '<h3 class="imp-h">ตรวจสอบก่อนนำเข้า</h3><div class="banner ' + (ok === list.length ? 'ok' : 'bad') + '">พร้อมนำเข้า ' + ok + ' รายการ' + (list.length - ok ? ' · ข้าม ' + (list.length - ok) + ' รายการ' : '') + '</div>' +
+    (impState.kind === 'journal' && list.length ? '<div class="small" style="margin:6px 0"><button type="button" class="linkish" id="impJnCsv">ดาวน์โหลดสมุดรายวันที่แปลงแล้ว (CSV) เพื่อตรวจก่อนนำเข้า</button></div>' : '') +
     '<div class="items-wrap" style="max-height:260px;overflow:auto"><table class="data-table"><thead><tr><th></th><th>รายการ</th><th>วันที่</th><th class="r">รายละเอียด</th></tr></thead><tbody>' +
     list.slice(0, 200).map(function(x) { return '<tr><td>' + (x.ok ? '✓' : '<span class="neg-text">✕</span>') + '</td><td>' + esc(x.label) + (x.err ? '<div class="small neg-text">' + esc(x.err) + '</div>' : '') + '</td><td class="num">' + (x.date ? fmtDateNum(x.date) : '') + '</td><td class="r">' + esc(x.sub || '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+}
+// journal import: rows -> balanced journal entries (one per entry number, or per date + description)
+function impAccount(v) {
+  v = String(v || '').trim(); if (!v) return null;
+  var code = v.split(/\s+/)[0];
+  return STORE.accounts.find(function(a) { return a.code === code; }) || STORE.accounts.find(function(a) { return a.code === v || String(a.name).trim() === v; }) || null;
+}
+function buildJournalImport() {
+  var groups = [], byKey = {}, existing = {}, lk = typeof lockDate === 'function' ? lockDate() : '';
+  STORE.documents.forEach(function(d) { if (d.type === 'journalEntry' && d.docNo) existing[d.docNo] = 1; });
+  impState.rows.forEach(function(r) {
+    var no = impVal(r, 'docNo'), date = impDate(impVal(r, 'date')), desc = impVal(r, 'desc'), key = no ? 'n:' + no : 'd:' + date + '|' + desc;
+    if (!byKey[key]) { byKey[key] = { no: no, date: date, desc: desc, note: impVal(r, 'note'), branch: impVal(r, 'branch'), rows: [] }; groups.push(byKey[key]); }
+    byKey[key].rows.push(r);
+  });
+  return groups.map(function(g) {
+    var errs = [], items = [];
+    g.rows.forEach(function(r) {
+      var raw = impVal(r, 'account'), a = impAccount(raw), dr = impNum(impVal(r, 'debit')), cr = impNum(impVal(r, 'credit'));
+      dr = isNaN(dr) ? 0 : dr; cr = isNaN(cr) ? 0 : cr;
+      if (!dr && !cr && impState.map.amount != null) { var amt = impNum(impVal(r, 'amount')); if (!isNaN(amt)) { if (amt >= 0) dr = amt; else cr = -amt; } }
+      if (dr < 0) { cr += -dr; dr = 0; } if (cr < 0) { dr += -cr; cr = 0; }
+      dr = round2(dr); cr = round2(cr);
+      if (!dr && !cr) return; // empty line
+      if (!a) { errs.push('ไม่พบบัญชี "' + (raw || '(ว่าง)') + '" ในผังบัญชี'); return; }
+      items.push({ account: a.code, accountName: a.name, debit: dr, credit: cr });
+    });
+    var tdr = round2(items.reduce(function(s, x) { return s + x.debit; }, 0)), tcr = round2(items.reduce(function(s, x) { return s + x.credit; }, 0));
+    var br = g.branch && g.branch !== '00000' ? g.branch.padStart(5, '0') : '';
+    if (!g.date) errs.unshift('วันที่ไม่ถูกต้อง');
+    else if (lk && g.date <= lk) errs.unshift('อยู่ในงวดที่ล็อกแล้ว (ถึง ' + fmtDateNum(lk) + ')');
+    if (g.no && existing[g.no]) errs.unshift('เลขที่ซ้ำกับที่มีอยู่ (ข้าม)');
+    if (!errs.length && items.length < 2) errs.push('ต้องมีอย่างน้อย 2 บรรทัด');
+    if (!errs.length && tdr !== tcr) errs.push('ไม่สมดุล: เดบิต ' + fmtMoney(tdr) + ' ≠ เครดิต ' + fmtMoney(tcr));
+    if (!errs.length && !tdr) errs.push('ยอดเงินเป็นศูนย์');
+    if (!errs.length && br && !allBranches().some(function(b) { return b.code === br; })) errs.push('ไม่พบรหัสสาขา ' + br);
+    var err = errs[0] || '', extra = { note: g.note || '', importedJournal: true };
+    if (br) extra.branch = br;
+    return { ok: !err, err: err, label: (g.no || '(ออกเลขอัตโนมัติ)') + ' · ' + (g.desc || 'สมุดรายวัน') + ' · ' + items.length + ' บรรทัด', sub: 'เดบิต ' + fmtMoney(tdr) + ' / เครดิต ' + fmtMoney(tcr), date: g.date, coll:'documents', autoNo: !g.no,
+      rec: { type:'journalEntry', typeLabel: DOC_TYPES.journalEntry.label, group:'other', party: g.desc || 'สมุดรายวัน', date: g.date, docNo: g.no, items: items, subtotal: tdr, vat: 0, total: tdr, wht: 0, net: tdr, status:'done', extra: extra } };
+  });
+}
+// the converted entries as a flat file, to check (or keep) before importing
+async function downloadJournalPreview() {
+  var list = (impState && impState.built) || [], q = function(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  var lines = [['เลขที่รายการ','วันที่','คำอธิบายรายการ','รหัสบัญชี','ชื่อบัญชี','เดบิต','เครดิต','สถานะ'].join(',')];
+  list.forEach(function(x) {
+    var st = x.ok ? 'พร้อมนำเข้า' : 'ข้าม: ' + x.err;
+    if (!x.rec.items.length) lines.push([x.rec.docNo || '', x.date, x.rec.party, '', '', '', '', st].map(q).join(','));
+    x.rec.items.forEach(function(it) { lines.push([x.rec.docNo || '(อัตโนมัติ)', x.date, x.rec.party, it.account, it.accountName, it.debit || '', it.credit || '', st].map(q).join(',')); });
+  });
+  var data = '\ufeff' + lines.join('\n') + '\n', name = 'journal-converted-' + todayStr() + '.csv', dl = await getDownloads();
+  if (dl) { try { await dl.save({ filename: name, data: data }); } catch (e) {} return; }
+  saveFileLocally(name, data, 'text/csv');
 }
 async function runImportWizard(btn) {
   var err = byId('formError');

@@ -93,6 +93,11 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   check('company menu opens on screen under the switcher', menu.right <= menu.w && menu.right > menu.w / 2 && menu.top > 40, menu);
   await fq.evaluate(() => toggleCoMenu());
 
+  REG('FEAT-04', 'ลบกล่อง "ข้อมูลติดต่อลูกค้า" ออกจากหน้าบัญชีและการตั้งค่า');
+  await fq.evaluate(() => go('settings', 'company')); await fq.waitForTimeout(400);
+  const coPage = await fq.textContent('#pageData');
+  check('customer contact box removed, company and legal sections still shown', !/ข้อมูลติดต่อลูกค้า/.test(coPage) && /ข้อมูลบริษัท/.test(coPage) && /ข้อมูลทางกฎหมาย/.test(coPage));
+
   REG('FEAT-02', 'กรองรายงานตามสาขา');
   await fq.evaluate(async () => {
     await putBranch({ code: '00001', name: 'สาขาหนึ่ง', active: true, createdAt: 1 });
@@ -130,6 +135,43 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   const ic = await fq.evaluate(() => lastReport.rows.filter(x => !x.g).map(x => strip2(x[3])));
   check('intercompany reconciliation matches both sides', ic.length === 3 && ic.every(t => t === 'ตรงกัน'), ic);
   check('no page errors (branch filter, group reports)', fq.errs.length === 0, fq.errs);
+
+  REG('FEAT-05', 'นำเข้าสมุดรายวัน / GL จากไฟล์ CSV');
+  const jq = await L.newPage(browser, pages.local);
+  await jq.evaluate(async () => { await loadStandardCoa(); await saveSettings('company', { lockDate: '2026-01-31' }); }); await jq.waitForTimeout(500);
+  const gl = '﻿Journal No,Date,Description,Account,Debit,Credit,Branch\n' +
+    'JV-A,30/09/2569,ค่าใช้จ่ายค้างจ่าย,5290,500,,\n' +
+    'JV-A,30/09/2569,ค่าใช้จ่ายค้างจ่าย,2110 เจ้าหนี้การค้า,,500,\n' +
+    'JV-B,2026-09-30,ไม่สมดุล,1120,1000,,\n' +
+    'JV-B,2026-09-30,ไม่สมดุล,1110,,900,\n' +
+    'JV-C,2026-09-30,บัญชีไม่มี,9999,100,,\n' +
+    'JV-C,2026-09-30,บัญชีไม่มี,1110,,100,\n' +
+    'JV-D,2026-01-15,งวดล็อก,1120,50,,\n' +
+    'JV-D,2026-01-15,งวดล็อก,1110,,50,\n' +
+    ',2026-10-01,โอนเงินสดเข้าธนาคาร,1120,"1,200.00",,\n' +
+    ',2026-10-01,โอนเงินสดเข้าธนาคาร,1110,,"1,200.00",\n';
+  await jq.evaluate(() => { go('settings', 'import'); openImportWizard('journal'); });
+  await jq.setInputFiles('#impWFile', { name: 'gl.csv', mimeType: 'text/csv', buffer: Buffer.from(gl) }); await jq.waitForSelector('#impPrev .banner');
+  const jp = await jq.evaluate(() => ({ map: impState.map, built: impState.built.map(x => [x.ok, x.rec.docNo || '', x.err, x.date]) }));
+  check('columns are matched automatically', ['docNo', 'date', 'desc', 'account', 'debit', 'credit', 'branch'].every(k => jp.map[k] != null), jp.map);
+  const by = no => jp.built.find(b => b[1] === no) || [];
+  check('balanced entry ready, Buddhist-era date converted', by('JV-A')[0] === true && by('JV-A')[3] === '2026-09-30', by('JV-A'));
+  check('unbalanced entry rejected with the difference', by('JV-B')[0] === false && /ไม่สมดุล/.test(by('JV-B')[2]), by('JV-B'));
+  check('unknown account rejected', by('JV-C')[0] === false && /ไม่พบบัญชี "9999"/.test(by('JV-C')[2]), by('JV-C'));
+  check('entry in a locked period rejected', by('JV-D')[0] === false && /งวดที่ล็อก/.test(by('JV-D')[2]), by('JV-D'));
+  check('rows without a number grouped by date + description', by('')[0] === true && jp.built.length === 5, jp.built);
+  const [jdl] = await Promise.all([jq.waitForEvent('download', { timeout: 10000 }), jq.click('#impJnCsv')]);
+  const conv = fs.readFileSync(await jdl.path(), 'utf8');
+  check('converted entries can be downloaded as CSV before importing', /^journal-converted-.*\.csv$/.test(jdl.suggestedFilename()) && /JV-A,2026-09-30,ค่าใช้จ่ายค้างจ่าย,2110,เจ้าหนี้การค้า,,500,พร้อมนำเข้า/.test(conv) && /ข้าม: ไม่สมดุล/.test(conv), conv.slice(0, 300));
+  await jq.click('#modalFoot >> text=นำเข้า'); await jq.waitForTimeout(800);
+  const jr = await jq.evaluate(() => { const js = STORE.documents.filter(d => d.type === 'journalEntry' && d.extra && d.extra.importedJournal); const p = {}; js.forEach(d => postingsOf(d).forEach(l => { p[l.code] = Math.round(((p[l.code] || 0) + l.dr - l.cr) * 100) / 100; })); return { n: js.length, nos: js.map(d => d.docNo).sort(), p, toast: byId('toast').textContent }; });
+  check('two journal entries imported, the unnumbered one gets the next JV number', jr.n === 2 && jr.nos.includes('JV-A') && jr.nos.some(n => /^JV-\d{6}-\d{3}$/.test(n)) && /นำเข้าแล้ว 2 รายการ/.test(jr.toast), jr);
+  check('imported entries post to the ledger', jr.p['5290'] === 500 && jr.p['2110'] === -500 && jr.p['1120'] === 1200 && jr.p['1110'] === -1200, jr.p);
+  await jq.evaluate(() => { go('settings', 'import'); openImportWizard('journal'); });
+  await jq.setInputFiles('#impWFile', { name: 'gl.csv', mimeType: 'text/csv', buffer: Buffer.from(gl) }); await jq.waitForSelector('#impPrev .banner');
+  check('importing the same file again skips numbers that already exist', /เลขที่ซ้ำ/.test(await jq.evaluate(() => impState.built.find(x => x.rec.docNo === 'JV-A').err)));
+  await jq.evaluate(() => closeModal());
+  check('no page errors (journal import)', jq.errs.length === 0, jq.errs);
 
   /* ---------- Firebase (Emulator) ---------- */
   await L.resetEmulators();
