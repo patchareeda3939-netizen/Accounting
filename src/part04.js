@@ -22,6 +22,7 @@ function cashFlowLines() {
     var other = ls.filter(function(l) { return !isCash[l.code]; }); if (!other.length) return; // transfer between cash accounts
     var cat;
     if (d.extra && d.extra.openingFor) return; // opening balances are not cash received
+    if (isYearClose(d)) return;
     if (d.type === 'journalEntry') {
       // only income/expense counterparts are รายรับ-รายจ่าย; capital, loans, opening balances and transfers are not
       var pl = other.filter(function(l) { var b = accBaseOf(l.code); return b === 'income' || b === 'expense'; });
@@ -199,7 +200,7 @@ function itemsDetail(types) {
 }
 function plRows(docs) {
   var rev = {}, exp = {};
-  docs.forEach(function(d) { postingsOf(d).forEach(function(l) { var b = accBaseOf(l.code), k = l.code + ' ' + (acctName(l.code) || ''); if (b === 'income') rev[k] = (rev[k] || 0) + l.cr - l.dr; else if (b === 'expense') exp[k] = (exp[k] || 0) + l.dr - l.cr; }); });
+  docs.forEach(function(d) { if (isYearClose(d)) return; postingsOf(d).forEach(function(l) { var b = accBaseOf(l.code), k = l.code + ' ' + (acctName(l.code) || ''); if (b === 'income') rev[k] = (rev[k] || 0) + l.cr - l.dr; else if (b === 'expense') exp[k] = (exp[k] || 0) + l.dr - l.cr; }); });
   return { rev: rev, exp: exp };
 }
 function plMulti(periods) {
@@ -348,7 +349,7 @@ var RG = {
       rows.push(['ยอดยกมา', '', fmtNum(run), M(run * cost)]);
       DOCS().slice().sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); }).forEach(function(d) {
         var q = 0;
-        if (d.type === 'inventoryAdjust' && d.party === r.p.name) q = Number(d.extra && d.extra.qtyChange) || 0;
+        if (d.type === 'inventoryAdjust' && !d.voided) q = adjQty(d, r.p.name);
         if ((d.type === 'invoice' || d.type === 'bill') && d.items) d.items.forEach(function(it) { if (it.name === r.p.name) q += (d.type === 'bill' ? 1 : -1) * (Number(it.qty) || 0); });
         if (!q) return; run += q;
         rows.push({ doc: d._id, c: [fmtDateNum(d.date) + ' ' + esc(d.typeLabel) + ' ' + dn(d), fmtNum(q), fmtNum(run), M(run * cost)] });

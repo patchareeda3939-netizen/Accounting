@@ -75,9 +75,9 @@ function sampleDoc(type) {
 var FORM_SPEC = {
   estimate:     { th:'ใบเสนอราคา', en:'QUOTATION', to:'เสนอราคาแก่', date2:['validUntil','ยืนราคาถึง'], total:'ยอดรวมที่เสนอ', sign:['ผู้เสนอราคา','ผู้อนุมัติ','ลูกค้าผู้อนุมัติสั่งซื้อ'], note:'ราคานี้ยืนยันถึงวันที่ระบุ กรุณาลงนามยืนยันเพื่อสั่งซื้อ' },
   salesOrder:   { th:'ใบสั่งขาย', en:'SALES ORDER', to:'ลูกค้า', date2:['deliveryDate','กำหนดส่งของ'], total:'ยอดรวมตามใบสั่งขาย', sign:['ผู้จัดทำ','ผู้อนุมัติ','ลูกค้าผู้สั่งซื้อ'] },
-  invoice:      { th:'ใบแจ้งหนี้', thVat:'ใบแจ้งหนี้/ใบกำกับภาษี', en:'INVOICE', to:'ส่งถึง', date2:['dueDate','ครบกำหนด'], terms:true, total:'ยอดที่ต้องชำระ', pay:true, sign:['ผู้จัดทำ','ผู้อนุมัติ','ผู้รับเอกสาร / ลูกค้า'] },
-  receipt:      { th:'ใบเสร็จรับเงิน', thVat:'ใบเสร็จรับเงิน/ใบกำกับภาษี', en:'RECEIPT', to:'ได้รับเงินจาก', method:true, refLbl:'อ้างอิงใบแจ้งหนี้', total:'จำนวนเงินที่ได้รับ', sign:['ผู้รับเงิน','ผู้อนุมัติ','ผู้จ่ายเงิน'], note:'ใบเสร็จนี้จะสมบูรณ์เมื่อเรียกเก็บเงินได้ครบถ้วน' },
-  creditNote:   { th:'ใบลดหนี้', thVat:'ใบลดหนี้/ใบกำกับภาษี', en:'CREDIT NOTE', to:'ลูกค้า', refLbl:'อ้างอิงเอกสารเดิม', reason:true, total:'มูลค่าที่ลดหนี้', sign:['ผู้จัดทำ','ผู้อนุมัติ','ผู้รับเอกสาร / ลูกค้า'] },
+  invoice:      { th:'ใบแจ้งหนี้', thVat:'ใบแจ้งหนี้/ใบกำกับภาษี', en:'INVOICE', enVat:'INVOICE / TAX INVOICE', to:'ส่งถึง', date2:['dueDate','ครบกำหนด'], terms:true, total:'ยอดที่ต้องชำระ', pay:true, sign:['ผู้จัดทำ','ผู้อนุมัติ','ผู้รับเอกสาร / ลูกค้า'] },
+  receipt:      { th:'ใบเสร็จรับเงิน', thVat:'ใบเสร็จรับเงิน/ใบกำกับภาษี', en:'RECEIPT', enVat:'RECEIPT / TAX INVOICE', to:'ได้รับเงินจาก', method:true, refLbl:'อ้างอิงใบแจ้งหนี้', total:'จำนวนเงินที่ได้รับ', sign:['ผู้รับเงิน','ผู้อนุมัติ','ผู้จ่ายเงิน'], note:'ใบเสร็จนี้จะสมบูรณ์เมื่อเรียกเก็บเงินได้ครบถ้วน' },
+  creditNote:   { th:'ใบลดหนี้', thVat:'ใบลดหนี้/ใบกำกับภาษี', en:'CREDIT NOTE', enVat:'CREDIT NOTE / TAX INVOICE', to:'ลูกค้า', refLbl:'อ้างอิงเอกสารเดิม', reason:true, total:'มูลค่าที่ลดหนี้', sign:['ผู้จัดทำ','ผู้อนุมัติ','ผู้รับเอกสาร / ลูกค้า'] },
   refundReceipt:{ th:'ใบเสร็จการคืนเงิน', en:'REFUND RECEIPT', to:'คืนเงินให้', method:true, reason:true, total:'จำนวนเงินที่คืน', sign:['ผู้จ่ายคืน','ผู้อนุมัติ','ผู้รับเงินคืน'] },
   billingNote:  { th:'ใบแจ้งวางบิล', en:'BILLING NOTE', to:'วางบิลแก่', date2:['dueDate','นัดชำระวันที่'], billing:true, total:'ยอดรวมวางบิล', sign:['ผู้วางบิล','ผู้อนุมัติ','ผู้รับวางบิล'], note:'กรุณาตรวจสอบรายการและชำระตามวันนัดชำระ' }
 };
@@ -86,7 +86,9 @@ function renderForm(d, s) {
   var cs = companySettings(), ci = coInfoFor(d), c = contactOf(d.party), sh = s.show, col = s.color, ex = d.extra || {};
   var sp = FORM_SPEC[d.type] || { th: d.typeLabel, en:'', to:'ส่งถึง', total:'ยอดรวม', sign:[s.signPrep, s.signAppr, s.signCust] };
   var own = s.formType && s.formType !== 'default';
-  var title = (own && s.title) || (d.vat && sp.thVat && taxPointOf(d) !== 'payment' ? sp.thVat : sp.th);
+  var isTaxInv = !!(d.vat && sp.thVat && taxPointOf(d) !== 'payment');
+  var title = (own && s.title) || (isTaxInv ? sp.thVat : sp.th);
+  var enTitle = isTaxInv && sp.enVat ? sp.enVat : sp.en;
   var signs = own ? [s.signPrep, s.signAppr, s.signCust] : sp.sign;
   var logoW = { s:70, m:110, l:150 }[s.logoSize] || 110;
   var logoSrc = s.logo || cs.logo;
@@ -94,7 +96,7 @@ function renderForm(d, s) {
   var head = '<div class="pf-head pf-' + s.template + '" style="' + (s.template === 'fresh' ? 'background:' + col + ';color:#fff;' : '') + (s.logoPos === 'right' ? 'flex-direction:row-reverse;' : '') + '">' +
     (logo ? '<div class="pf-logo">' + logo + '</div>' : '') +
     '<div class="pf-co"><b>' + esc(ci.name) + '</b>' + (sh.address && ci.address ? '<div>' + esc(ci.address) + '</div>' : '') + (sh.phone && ci.phone ? '<div>โทร ' + esc(ci.phone) + '</div>' : '') + (sh.email && (cs.custEmail || cs.email) ? '<div>' + esc(cs.custEmail || cs.email) + '</div>' : '') + (sh.taxId && cs.taxId ? '<div>เลขประจำตัวผู้เสียภาษี ' + esc(cs.taxId) + ' (' + esc(ci.branchName) + ')</div>' : '') + '</div>' +
-    '<div class="pf-doctag" style="' + (s.template === 'fresh' ? 'color:#fff;border-color:#fff' : 'color:' + col + ';border-color:' + col) + '">' + esc(sp.en) + '<small>' + (d._copy === 'copy' ? 'สำเนา / COPY' : 'ต้นฉบับ / ORIGINAL') + '</small></div></div>';
+    '<div class="pf-doctag" style="' + (s.template === 'fresh' ? 'color:#fff;border-color:#fff' : 'color:' + col + ';border-color:' + col) + '">' + esc(enTitle) + (FORM_SPEC[d.type] ? '<small>' + (d._copy === 'copy' ? 'สำเนา / COPY' : 'ต้นฉบับ / ORIGINAL') + '</small>' : '') + '</div></div>';
   var thR = function(i, n) { return i >= n - 3; };
   var table;
   if (sp.billing) {
@@ -102,13 +104,14 @@ function renderForm(d, s) {
     table = '<table class="pf-table"><thead><tr style="background:' + col + '1f;color:' + col + '"><th>ลำดับ</th><th>เลขที่เอกสาร</th><th>วันที่เอกสาร</th><th>ครบกำหนด</th><th class="r">จำนวนเงิน</th></tr></thead><tbody>' +
       bi.map(function(it, i) { return '<tr><td>' + (i + 1) + '</td><td>' + esc(it.name) + '</td><td>' + fmtDateNum(it.date) + '</td><td>' + fmtDateNum(it.due) + '</td><td class="r">' + M((Number(it.qty) || 1) * (Number(it.price) || 0)) + '</td></tr>'; }).join('') + '</tbody></table>';
   } else {
-    var cols = [['colDate','วันที่'],['','รายการ'],['colDesc','คำอธิบาย'],['colTax','ภาษี'],['colQty','จำนวน'],['colRate','ราคา/หน่วย'],['','จำนวนเงิน']].filter(function(x) { return !x[0] || sh[x[0]]; });
-    var items = (d.items && d.items.length) ? d.items : [{ name: ex.reason || (ex.refDoc ? sp.th + ' อ้างอิง ' + ex.refDoc : d.typeLabel), qty:1, price: d.subtotal != null ? d.subtotal : d.total }];
-    var rows = items.map(function(it) {
-      var m = { colDate: fmtDateNum(d.date), colDesc: esc(it.desc || ''), colTax: d.vat ? '7%' : '-', colQty: fmtNum(it.qty), colRate: fmtNum(Number(it.price)) };
-      return '<tr>' + cols.map(function(x, i) { var v = !x[0] ? (i === 1 ? esc(it.name) : M((Number(it.qty) || 0) * (Number(it.price) || 0))) : m[x[0]]; return '<td' + (thR(i, cols.length) && x[0] !== 'colDesc' && x[0] !== 'colDate' ? ' class="r"' : '') + '>' + v + '</td>'; }).join('') + '</tr>';
+    var items = (d.items && d.items.length) ? d.items : [{ name: ex.reason || (ex.refDoc ? sp.th + ' อ้างอิง ' + ex.refDoc : (ex.expCategory || ex.incomeCat || (ex.account && acctName(ex.account)) || d.typeLabel)), desc: ex.supInvNo ? 'อ้างอิงใบกำกับ/บิลเลขที่ ' + ex.supInvNo : '', qty:1, price: d.subtotal != null ? d.subtotal : d.total }];
+    var rows = items.map(function(it, i) {
+      var pr = STORE.products.find(function(x) { return x.name === it.name; }), code = it.sku || (pr && pr.sku) || '';
+      var q = Number(it.qty) || 0, price = Number(it.price) || 0, disc = Number(it.discount) || 0, amt = q * price - disc;
+      return '<tr><td class="pf-desc"><span class="pf-no">' + (i + 1) + '.</span><div><b>' + esc(it.name) + '</b>' + (code ? ' <span class="pf-code">(' + esc(code) + ')</span>' : '') + (sh.colDesc && (it.desc || (pr && pr.desc)) ? '<div class="pf-sub">' + esc(it.desc || pr.desc) + '</div>' : '') + '</div></td>' +
+        '<td class="r">' + fmtNum2f(q) + '</td><td class="r">' + fmtNum2f(price) + '</td><td class="r">' + fmtNum2f(disc) + '</td><td class="r">' + (d.vat ? '7%' : '-') + '</td><td class="r">' + fmtNum2f(amt) + '</td></tr>';
     }).join('');
-    table = '<table class="pf-table"><thead><tr style="background:' + col + '1f;color:' + col + '">' + cols.map(function(x, i) { return '<th' + (thR(i, cols.length) && x[0] !== 'colDesc' && x[0] !== 'colDate' ? ' class="r"' : '') + '>' + x[1] + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    table = '<div class="pf-items"><table class="pf-table pf-table2"><thead><tr style="background:' + col + '1f;color:' + col + '"><th>คำอธิบาย</th><th class="r">จำนวน</th><th class="r">ราคา</th><th class="r">ส่วนลด</th><th class="r">VAT</th><th class="r">มูลค่าก่อนภาษี</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
   var kv = '<span>เลขที่</span><b>' + esc(d.docNo || '-') + '</b><span>วันที่</span><b>' + fmtDateNum(d.date) + '</b>';
   if (sp.terms && sh.terms && ex.dueDate) kv += '<span>เงื่อนไข</span><b>เครดิต ' + Math.max(0, daysBetween(d.date, ex.dueDate)) + ' วัน</b>';
@@ -117,11 +120,15 @@ function renderForm(d, s) {
   if (sp.method && ex.method) kv += '<span>ชำระโดย</span><b>' + esc(ex.method) + '</b>';
   var hasPay = sp.pay && d.payments && d.payments.length;
   var sub = d.subtotal != null ? d.subtotal : d.total;
-  var sum = '<div class="pf-sum">' + (sp.billing ? '' : '<div><span>รวมเป็นเงิน</span><span>' + M(sub) + '</span></div>' + (d.vat ? '<div><span>ภาษีมูลค่าเพิ่ม 7%</span><span>' + M(d.vat) + '</span></div>' : '') + '<div><span>ยอดรวม</span><span>' + M(d.total) + '</span></div>') +
-    (d.wht ? '<div class="pf-wht"><span>หักภาษี ณ ที่จ่าย ' + esc(d.whtRate) + '% (จาก ' + M(sub) + ')</span><span>−' + M(d.wht) + '</span></div>' : '') +
-    (hasPay ? '<div><span>ชำระแล้ว</span><span>−' + M(docPaidAmt(d)) + '</span></div>' : '') +
-    '<div class="pf-due" style="border-color:' + col + '"><span>' + (hasPay ? 'ยอดคงค้าง' : sp.total) + '</span><b>' + M(hasPay ? docBal(d) : (sp.billing ? d.total : docNet(d))) + '</b></div>' +
-    '<div class="pf-words">(' + bahtText(hasPay ? docBal(d) : (sp.billing ? d.total : docNet(d))) + ')</div></div>';
+  var payNow = hasPay ? docBal(d) : (sp.billing ? d.total : docNet(d));
+  var B = function(n) { return fmtNum2f(n) + ' บาท'; };
+  var sum = '<div class="pf-sum2">' +
+    '<div class="pf-sum2-lbl"><span class="pf-sum2-ic" style="background:' + col + '"></span>สรุป</div>' +
+    '<div class="pf-sum2-mid">' + (sp.billing ? '' : (d.vat ? '<div><span>มูลค่าที่คำนวณภาษี 7%</span><span>' + B(sub) + '</span></div><div><span>ภาษีมูลค่าเพิ่ม 7%</span><span>' + B(d.vat) + '</span></div>' : '<div><span>มูลค่าไม่มีภาษี</span><span>' + B(sub) + '</span></div>')) +
+      '<div><span>จำนวนเงินทั้งสิ้น</span><span class="pf-sum2-words">' + bahtText(d.total) + '</span></div></div>' +
+    '<div class="pf-sum2-right"><div class="pf-sum2-total" style="background:' + col + '1a"><span>จำนวนเงินทั้งสิ้น</span><b>' + fmtNum2f(d.total) + ' <small>บาท</small></b></div>' +
+      '<div class="pf-sum2-rows"><div><span>จำนวนเงินที่ถูกหัก ณ ที่จ่าย' + (d.wht ? ' ' + esc(d.whtRate) + '%' : '') + '</span><span>' + B(d.wht || 0) + '</span></div>' +
+      (hasPay ? '<div><span>ชำระแล้ว</span><span>' + B(docPaidAmt(d)) + '</span></div><div><b>ยอดคงค้าง</b><b>' + B(docBal(d)) + '</b></div>' : '<div><b>จำนวนเงินที่ชำระ</b><b>' + B(payNow) + '</b></div>') + '</div></div></div>';
   var notes = [d.type === 'invoice' && taxPointOf(d) === 'payment' && d.vat ? 'ค่าบริการ: ใบกำกับภาษีจะออกให้เมื่อได้รับชำระเงิน' : '', ex.reason && sp.reason ? 'เหตุผล: ' + ex.reason : '', ex.note, s.note, !own ? sp.note : ''].filter(Boolean);
   var body = '<div class="pf-title" style="color:' + (s.template === 'fresh' ? 'var(--pf-ink)' : col) + '">' + esc(title) + '</div>' +
     '<div class="pf-meta"><div><div class="pf-lbl">' + esc(sp.to) + '</div><b>' + esc(d.party) + '</b>' + (c.address ? '<div>' + esc(c.address) + '</div>' : '') + (c.taxId ? '<div>เลขประจำตัวผู้เสียภาษี ' + esc(c.taxId) + (c.branch ? ' (' + esc(c.branch) + ')' : '') + '</div>' : '') + '</div><div class="pf-kv">' + kv + '</div></div>' +
@@ -136,6 +143,7 @@ function renderForm(d, s) {
     (s.footer ? '<div class="pf-footer">' + esc(s.footer) + '</div>' : '');
   return '<div class="pf-paper' + (s.printSafe ? ' pf-safe' : '') + (s.template === 'classic' ? ' pf-classic' : '') + '" style="font-family:\'' + esc(s.font) + '\', \'IBM Plex Sans Thai\', sans-serif;--pf-accent:' + col + '">' + head + '<div class="pf-body">' + body + '</div></div>';
 }
+function fmtNum2f(n) { return (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function bahtText(n) {
   n = round2(Math.abs(Number(n) || 0));
   var D = ['','หนึ่ง','สอง','สาม','สี่','ห้า','หก','เจ็ด','แปด','เก้า'], P = ['','สิบ','ร้อย','พัน','หมื่น','แสน'];

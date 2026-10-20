@@ -82,7 +82,7 @@ function reconStmtBar() {
   if (!rec.stmt) return '<div class="stmt-bar"><span>มีไฟล์ Statement จากธนาคาร? นำเข้าเพื่อจับคู่รายการอัตโนมัติ</span><button type="button" class="btn btn-outline" data-stmtimp>นำเข้า Statement ธนาคาร</button></div>';
   var n = Object.keys(rec.match).length, last = rec.stmt[rec.stmt.length - 1];
   return '<div class="stmt-bar"><span>Statement ' + rec.stmt.length + ' รายการ · จับคู่แล้ว <b>' + n + '</b> · ยังไม่จับคู่ <b' + (n < rec.stmt.length ? ' class="neg-text"' : '') + '>' + (rec.stmt.length - n) + '</b>' + (last.bal != null ? ' · ยอดคงเหลือตาม Statement ' + fmtMoney(last.bal) : '') + '</span>' +
-    '<span class="toolbar" style="margin:0"><button type="button" class="btn btn-outline btn-sm" data-stmtauto>จับคู่อัตโนมัติอีกครั้ง</button><button type="button" class="btn btn-outline btn-sm" data-stmtimp>นำเข้าไฟล์ใหม่</button><button type="button" class="btn btn-outline btn-sm" data-stmtclear>ปิด Statement</button></span></div>';
+    '<span class="toolbar" style="margin:0">' + (stmtRulePending().length ? '<button type="button" class="btn btn-dark btn-sm" data-stmtrules>ใช้กฎ (' + stmtRulePending().length + ' รายการ)</button>' : '') + '<button type="button" class="btn btn-outline btn-sm" data-stmtauto>จับคู่อัตโนมัติอีกครั้ง</button><button type="button" class="btn btn-outline btn-sm" data-stmtimp>นำเข้าไฟล์ใหม่</button><button type="button" class="btn btn-outline btn-sm" data-stmtclear>ปิด Statement</button></span></div>';
 }
 function reconMatchHTML(lines) {
   var byKey = {}; stmtBookPool().forEach(function(l) { byKey[l.key] = l; });
@@ -92,7 +92,7 @@ function reconMatchHTML(lines) {
     var mk = rec.match[s.i], l = mk && byKey[mk], sel = rec.selS === s.i;
     var right = l ? '<div class="stm-book"><span class="stm-ok">✓ จับคู่</span> ' + esc((l.d.docNo || '') + ' · ' + (l.d.party || '')) + ' · ' + fmtDateNum(l.date) + ' <button type="button" class="linkish" data-unmatch="' + s.i + '">ยกเลิกคู่</button></div>'
       : '<div class="stm-book"><span class="stm-no">ยังไม่มีคู่</span> ' + (sel ? '<b>เลือกรายการในบัญชีด้านขวาเพื่อจับคู่</b> · ' : '<button type="button" class="linkish" data-sels="' + s.i + '">จับคู่เอง</button> · ') +
-        '<select data-stacc="' + s.i + '" aria-label="บัญชีคู่"><option value="">บันทึกเป็นรายการใหม่ในบัญชี…</option>' + incs.map(function(a) { return '<option value="' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>';
+        (function() { var ru = ruleFor(s, rec.acc); return ru ? '<span class="rule-chip" title="' + esc(ruleCondText(ru)) + '">กฎ: ' + esc(ru.name) + ' → ' + esc(ru.account + ' ' + acctName(ru.account)) + ' <button type="button" class="linkish" data-ruleone="' + s.i + '">บันทึก</button></span> ' : ''; })() + '<select data-stacc="' + s.i + '" aria-label="บัญชีคู่"><option value="">บันทึกเป็นรายการใหม่ในบัญชี…</option>' + incs.map(function(a) { return '<option value="' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>';
     return '<div class="stm-row' + (l ? ' ok' : '') + (sel ? ' sel' : '') + '"><div class="stm-main"><span class="num">' + fmtDateNum(s.date) + '</span><span class="stm-desc">' + esc(s.desc) + (s.ref ? ' <span class="muted small">' + esc(s.ref) + '</span>' : '') + '</span><b class="' + (s.amt < 0 ? 'neg-text' : 'pos-text') + '">' + (s.amt > 0 ? '+' : '') + fmtMoney(s.amt) + '</b></div>' + right + '</div>';
   }).join('');
   var rightRows = lines.map(function(l) {
@@ -104,19 +104,17 @@ function reconMatchHTML(lines) {
 }
 function bindStmt(c) {
   c.querySelectorAll('[data-stmtimp]').forEach(function(b) { b.onclick = openStmtImport; });
+  c.querySelectorAll('[data-stmtrules]').forEach(function(b) { b.onclick = function() { stmtApplyRules(b); }; });
+  c.querySelectorAll('[data-ruleone]').forEach(function(b) { b.onclick = async function() { var st = rec.stmt[Number(b.dataset.ruleone)], ru = ruleFor(st, rec.acc); if (!ru) return; b.disabled = true; try { await stmtRecord(st, ru.account, ru.payee, ru.memo); showToast('บันทึกตามกฎ "' + ru.name + '" แล้ว'); } catch (e) { showToast(writeError(e)); } refreshPageData(); }; });
   c.querySelectorAll('[data-stmtauto]').forEach(function(b) { b.onclick = function() { stmtAutoMatch(); refreshPageData(); }; });
   c.querySelectorAll('[data-stmtclear]').forEach(function(b) { b.onclick = function() { rec.stmt = null; rec.match = {}; rec.selS = null; refreshPageData(); }; });
   c.querySelectorAll('[data-unmatch]').forEach(function(b) { b.onclick = function() { var k = rec.match[b.dataset.unmatch]; delete rec.match[b.dataset.unmatch]; if (k) delete rec.cleared[k]; refreshPageData(); }; });
   c.querySelectorAll('[data-sels]').forEach(function(b) { b.onclick = function() { rec.selS = Number(b.dataset.sels); refreshPageData(); }; });
   c.querySelectorAll('[data-stacc]').forEach(function(s) { s.onchange = async function() {
     if (!s.value) return;
-    var st = rec.stmt[Number(s.dataset.stacc)], a = Math.abs(st.amt), bank = rec.acc, other = s.value, dr = st.amt > 0 ? bank : other, cr = st.amt > 0 ? other : bank;
+    var st = rec.stmt[Number(s.dataset.stacc)], ru = ruleFor(st, rec.acc);
     s.disabled = true;
-    var before = {}; reconLines(bank).forEach(function(l) { before[l.key] = 1; });
-    await addRec('documents', { type:'journalEntry', typeLabel: DOC_TYPES.journalEntry.label, group:'other', party: st.desc, date: st.date, docNo: nextDocNo('journalEntry', st.date),
-      items: [{ account: dr + ' ' + acctName(dr), debit: a, credit: 0 }, { account: cr + ' ' + acctName(cr), debit: 0, credit: a }], total: a, extra: { bankTx: st.amt > 0 ? 'in' : 'out', ref: st.ref, fromStatement: true }, status:'done', createdAt: Date.now() });
-    var nl = reconLines(bank).find(function(l) { return !before[l.key]; });
-    if (nl) { rec.match[st.i] = nl.key; rec.cleared[nl.key] = 1; }
+    await stmtRecord(st, s.value, ru && ru.account === s.value ? ru.payee : '', ru && ru.account === s.value ? ru.memo : '');
     showToast('บันทึกรายการและจับคู่แล้ว'); refreshPageData();
   }; });
   if (rec.stmt && rec.selS != null) {
