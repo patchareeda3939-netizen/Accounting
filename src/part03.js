@@ -6,7 +6,7 @@ function accBaseOf(code) {
 // P&L from the ledger: every posting to an income / expense account counts
 function plTotals(docs) {
   var rev = 0, exp = 0;
-  docs.forEach(function(d) { postingsOf(d).forEach(function(l) { var b = accBaseOf(l.code); if (b === 'income') rev += l.cr - l.dr; else if (b === 'expense') exp += l.dr - l.cr; }); });
+  docs.forEach(function(d) { if (isYearClose(d)) return; postingsOf(d).forEach(function(l) { var b = accBaseOf(l.code); if (b === 'income') rev += l.cr - l.dr; else if (b === 'expense') exp += l.dr - l.cr; }); });
   return { rev: round2(rev), exp: round2(exp), profit: round2(rev - exp) };
 }
 function openItems(type) {
@@ -71,7 +71,7 @@ function accountBalances() {
 function productStock(p) {
   var q = Number(p.openingQty) || 0;
   STORE.documents.forEach(function(d) {
-    if (d.type === 'inventoryAdjust' && d.party === p.name) q += Number(d.extra && d.extra.qtyChange) || 0;
+    if (d.type === 'inventoryAdjust' && !d.voided) q += adjQty(d, p.name);
     if ((d.type === 'invoice' || d.type === 'bill') && d.items) {
       d.items.forEach(function(r) { if (r.name === p.name) q += (d.type === 'bill' ? 1 : -1) * (Number(r.qty) || 0); });
     }
@@ -118,6 +118,7 @@ var SUBNAV_ITEMS = [
       { key:'batchTx', label:'ธุรกรรมการรวม' },
       { key:'reconcile', label:'กระทบยอด' },
       { key:'monthClose', label:'ปิดงบรายเดือน' },
+      { key:'yearClose', label:'ปิดบัญชีสิ้นปี' },
       { key:'rules', label:'กฎ' },
       { key:'coa', label:'ผังบัญชี' },
       { key:'opening', label:'ยอดยกมา (งบปีก่อน)' },
@@ -126,6 +127,7 @@ var SUBNAV_ITEMS = [
     ] },
   { key:'alldocs',    label:'เอกสารทั้งหมด', color:'#4C5E76', icon:'🗂️', children: [
       { key:'list', label:'รายการเอกสาร' },
+      { key:'journals', label:'สมุดรายวัน' },
       { key:'batch', label:'บันทึกหลายรายการ' }
     ] },
   { key:'billing',    label:'ค่าใช้จ่ายและบิล', color:'#2E8B6F', icon:'💳', children: [
@@ -294,6 +296,11 @@ function renderPage() {
   else if (pid === 'accounting:reconcile') shell = reconShell();
   else if (pid === 'accounting:monthClose') shell = monthCloseShell();
   else if (pid === 'tax:wht') shell = whtListShell();
+  else if (pid === 'inventory:purchaseOrder') shell = poShell();
+  else if (pid === 'accounting:recurring') shell = recurShell();
+  else if (pid === 'accounting:rules') shell = rulesShell();
+  else if (pid === 'alldocs:journals') shell = jnShell();
+  else if (pid === 'accounting:yearClose') shell = ycShell();
   else if (TX_PAGES[pid]) shell = txShell(pid);
   else if (pid === 'billing:suppliers') { pageState.contactTab = 'supplier'; shell = contactsShell('ซัพพลายเออร์'); }
   else if (pid === 'sales:products') shell = productsShell('ผลิตภัณฑ์และบริการ');
@@ -344,6 +351,11 @@ function refreshPageData() {
   else if (pid === 'accounting:reconcile') html = reconData();
   else if (pid === 'accounting:monthClose') html = monthCloseData();
   else if (pid === 'tax:wht') html = whtListData();
+  else if (pid === 'inventory:purchaseOrder') html = poData();
+  else if (pid === 'accounting:recurring') html = recurData();
+  else if (pid === 'accounting:rules') html = rulesData();
+  else if (pid === 'alldocs:journals') html = jnData();
+  else if (pid === 'accounting:yearClose') html = ycData();
   else if (TX_PAGES[pid]) html = txData(pid);
   else if (pid === 'billing:suppliers') html = contactsData();
   else if (pid === 'sales:products') html = productsData();
@@ -383,7 +395,7 @@ function refreshPageData() {
   if (pid === 'accounting:reconcile') bindRecon();
   if (pid === 'accounting:monthClose') bindMonthClose();
   if (pid === 'tax:wht') bindWhtList();
-  if (TX_PAGES[pid]) bindTx(pid);
+  if (TX_PAGES[pid] && pid !== 'inventory:purchaseOrder') bindTx(pid);
   if (pid === 'inventory:overview') bindInvOverview();
   if (pid === 'tax:overview') bindTaxOv();
   if (pid === 'project:list' || pid === 'project:dept') bindDims();
@@ -688,7 +700,7 @@ function salesOverviewData() {
 /* ---- Inventory overview ---- */
 pageState.bestDays = 30;
 function stockRows() {
-  return STORE.products.filter(function(p) { return p.kind !== 'service'; }).map(function(p) {
+  return STORE.products.filter(function(p) { return isStocked(p); }).map(function(p) {
     var rp = p.reorderPoint != null && p.reorderPoint !== '' ? Number(p.reorderPoint) : 5;
     return { p: p, stock: productStock(p), rp: rp };
   });
@@ -740,7 +752,7 @@ function invOverviewData() {
 function bindInvOverview() {
   var s = byId('bestDays'); if (s) s.addEventListener('change', function() { pageState.bestDays = Number(s.value); refreshPageData(); });
   byId('pageData').querySelectorAll('[data-adjust]').forEach(function(b) { b.addEventListener('click', function() {
-    openDocForm('inventoryAdjust'); byId('f_party').value = b.dataset.adjust;
+    openInvAdjForm(null, b.dataset.adjust);
   }); });
 }
 function openSalesByProduct() {
@@ -1255,26 +1267,44 @@ function contactsData() {
 }
 
 /* ---- Products ---- */
+pageState.invTab = 'products'; pageState.invKind = ''; pageState.invStock = '';
+function invStockState(p) {
+  if (!isStocked(p)) return 'none';
+  var st = productStock(p), rp = (p.reorderPoint != null && p.reorderPoint !== '') ? Number(p.reorderPoint) : 5;
+  return st <= 0 ? 'out' : st <= rp ? 'low' : 'in';
+}
 function productsShell(title) {
-  return pageHead(title || 'สินค้าคงคลัง', 'สินค้าและบริการที่ขาย สต็อกคงเหลือ = ยอดยกมา + บิลซื้อ − ใบแจ้งหนี้ ± การปรับสต็อก (จับคู่ตามชื่อรายการ)',
-    '<button class="btn btn-primary btn-sm" type="button" data-new="products">+ เพิ่มสินค้า/บริการ</button><button class="btn btn-sm" type="button" data-open="inventoryAdjust">ปรับสต็อก</button>') +
-    '<div class="toolbar"><div class="field grow" style="max-width:320px"><label for="pq">ค้นหา</label><input id="pq" type="search" data-state="page.productQ" value="' + esc(pageState.productQ) + '" placeholder="ชื่อหรือรหัสสินค้า"></div></div>';
+  var sel = function(st, opts) { return '<select class="coa-select" data-state="page.' + st + '">' + opts.map(function(o) { return '<option value="' + o[0] + '"' + (pageState[st] === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>'; };
+  var tab = function(k, l) { return '<button type="button" class="iv-tab' + (pageState.invTab === k ? ' on' : '') + '" onclick="pageState.invTab=\'' + k + '\';document.querySelectorAll(\'.iv-tab\').forEach(function(x){x.classList.toggle(\'on\',x===this)},this);byId(\'ivFilters\').hidden=(\'' + k + '\'!==\'products\');document.querySelector(\'.iv-actions\').hidden=(\'' + k + '\'!==\'products\');refreshPageData()">' + l + '</button>'; };
+  return '<div class="page-head"><div><h1 class="section-title">' + esc(title || 'สินค้าคงคลัง') + '</h1></div></div>' +
+    '<div class="iv-tabs">' + tab('products','ผลิตภัณฑ์') + tab('adj','การปรับ') + '</div>' +
+    '<div class="iv-actions"' + (pageState.invTab === 'products' ? '' : ' hidden') + '><details class="iv-new"><summary class="btn btn-outline">เพิ่มเติม ▾</summary><div class="iv-menu"><button type="button" onclick="this.closest(\'details\').open=false;openDocForm(\'inventoryAdjust\')">ปรับจำนวนสินค้า</button><button type="button" onclick="this.closest(\'details\').open=false;openStockCount()">ใบงานตรวจนับสต็อก</button><button type="button" onclick="this.closest(\'details\').open=false;go(\'inventory\',\'purchaseOrder\')">ใบสั่งซื้อ</button><button type="button" onclick="this.closest(\'details\').open=false;openExportData()">ส่งออกรายการ</button></div></details>' +
+    '<details class="iv-new"><summary class="btn btn-dark">ผลิตภัณฑ์/บริการใหม่ ▾</summary><div class="iv-menu"><button type="button" onclick="this.closest(\'details\').open=false;openRecordForm(\'products\',null,{kind:\'service\'})">บริการ<small>บริการที่ให้แก่ลูกค้า ไม่นับสต็อก</small></button><button type="button" onclick="this.closest(\'details\').open=false;openRecordForm(\'products\',null,{kind:\'goods\'})">รายการสินค้าคงคลัง<small>สินค้าที่ซื้อขายและติดตามจำนวนคงเหลือ</small></button><button type="button" onclick="this.closest(\'details\').open=false;openRecordForm(\'products\',null,{kind:\'noninv\'})">ของไม่นับสต็อก<small>ของที่ซื้อขายแต่ไม่ต้องติดตามจำนวน</small></button><button type="button" onclick="this.closest(\'details\').open=false;openRecordForm(\'products\',null,{kind:\'bundle\'})">รวมชุด<small>รวมสินค้า/บริการหลายรายการขายเป็นชุด</small></button><button type="button" onclick="this.closest(\'details\').open=false;openImportWizard(\'products\')">นำเข้าแบทช์<small>นำเข้าหลายรายการจากไฟล์ Excel/CSV</small></button></div></details></div>' +
+    '<div class="iv-filters" id="ivFilters"' + (pageState.invTab === 'products' ? '' : ' hidden') + '>' +
+      '<div class="field iv-q"><span class="iv-lbl">ค้นหา</span><label class="coa-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input type="search" data-state="page.productQ" value="' + esc(pageState.productQ || '') + '" placeholder="ค้นหาตามชื่อ รายละเอียด หรือหมวดหมู่"></label></div>' +
+      '<div class="field"><label>ประเภท</label>' + sel('invKind', [['','ทั้งหมด'],['goods','สินค้าคงคลัง'],['service','บริการ'],['noninv','ของไม่นับสต็อก'],['bundle','รวมชุด']]) + '</div>' +
+      '<div class="field"><label>สถานะสินค้าคงคลัง</label>' + sel('invStock', [['','ทั้งหมด'],['in','มีสินค้า'],['low','สินค้าเหลือน้อย'],['out','สินค้าหมด'],['none','ยังไม่ได้ติดตาม']]) + '</div></div>';
 }
 function productsData() {
+  if (pageState.invTab === 'adj') return adjTabData();
   var q = (pageState.productQ || '').toLowerCase();
-  var list = STORE.products.filter(function(p) { return !q || [p.name, p.sku].join(' ').toLowerCase().indexOf(q) >= 0; });
-  var totalVal = 0;
+  var list = STORE.products.filter(function(p) {
+    if (q && [p.name, p.sku, p.category].join(' ').toLowerCase().indexOf(q) < 0) return false;
+    if (pageState.invKind && (p.kind || 'goods') !== pageState.invKind) return false;
+    if (pageState.invStock && invStockState(p) !== pageState.invStock) return false;
+    return true;
+  });
+  var img = '<span class="iv-img"><svg width="26" height="22" viewBox="0 0 26 22" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="24" height="20" rx="1"/><circle cx="8" cy="7" r="2.5"/><path d="M1 18l7-7 5 5 4-3 8 6"/></svg></span>';
   var rows = list.map(function(p) {
-    var goods = p.kind !== 'service';
-    var stock = goods ? productStock(p) : null;
-    var val = goods ? stock * (Number(p.cost) || 0) : 0;
-    totalVal += val;
-    var stockCell = !goods ? '<span class="muted">บริการ</span>' : (stock <= (p.reorderPoint != null && p.reorderPoint !== '' ? Number(p.reorderPoint) : 5) ? '<span class="status ' + (stock <= 0 ? 'st-overdue' : 'st-unpaid') + '">' + fmtNum(stock) + '</span>' : fmtNum(stock)) + ' <span class="small muted">' + esc(p.unit || '') + '</span>';
-    return '<tr class="row-link" tabindex="0" data-product="' + esc(p._id) + '"><td class="docno">' + esc(p.sku || '-') + '</td><td>' + esc(p.name) + '</td><td class="r">' + (p.price != null ? fmtMoney(p.price) : '-') + '</td><td class="r">' + (p.cost != null ? fmtMoney(p.cost) : '-') + '</td><td class="r">' + stockCell + '</td><td class="r">' + (goods ? fmtMoney(val) : '') + '</td></tr>';
+    var goods = isStocked(p), ss = invStockState(p);
+    var qty = goods ? '<span class="' + (ss === 'out' ? 'neg-text' : ss === 'low' ? 'iv-low' : '') + '">' + fmtNum(productStock(p)) + '</span>' : '';
+    return '<tr><td><input type="checkbox" aria-label="เลือก"></td><td class="iv-name">' + (p.image ? '<span class="iv-img"><img src="' + esc(p.image) + '" alt=""></span>' : img) + '<a href="#" data-product="' + esc(p._id) + '" onclick="event.preventDefault()">' + esc(p.name) + '</a></td>' +
+      '<td class="muted">' + esc(p.desc || '') + '</td><td class="r">' + qty + '</td><td>' + (p.category ? esc(p.category) : '<span class="muted">ยังไม่ได้จัดหมวดหมู่</span>') + '</td><td>' + esc(p.sku || '') + '</td><td>' + kindLabel(p) + '</td>' +
+      '<td class="r iv-act"><a href="#" data-product="' + esc(p._id) + '" onclick="event.preventDefault()">แก้ไข</a>' + (goods ? '<details class="iv-dd"><summary>▾</summary><div class="iv-menu"><button type="button" onclick="this.closest(\'details\').open=false;openInvAdjForm(null,' + esc(JSON.stringify(p.name)) + ')">ปรับปริมาณ</button></div></details>' : '') + '</td></tr>';
   }).join('');
-  return tableOrEmpty('<th>รหัส</th><th>ชื่อ</th><th class="r">ราคาขาย</th><th class="r">ต้นทุน</th><th class="r">คงเหลือ</th><th class="r">มูลค่าตามทุน</th>', rows,
-    STORE.products.length ? 'ไม่พบสินค้าที่ค้นหา' : 'ยังไม่มีสินค้า เพิ่มแล้วเลือกในใบแจ้งหนี้ได้เลย ราคาจะเติมให้อัตโนมัติ',
-    '<tr><td colspan="5">มูลค่าสินค้าคงเหลือรวม</td><td class="r">' + fmtMoney(totalVal) + '</td></tr>');
+  var n = list.length;
+  return tableOrEmpty('<th style="width:36px"><input type="checkbox" aria-label="เลือกทั้งหมด" onclick="var c=this.checked;this.closest(\'table\').querySelectorAll(\'tbody input[type=checkbox]\').forEach(function(x){x.checked=c})"></th><th>ชื่อ ↑</th><th>คำอธิบาย</th><th class="r">ปริมาณคงเหลือ</th><th>หมวดหมู่</th><th>รายละเอียด</th><th>ประเภท</th><th class="r">การดำเนินการ</th>', rows,
+    STORE.products.length ? 'ไม่พบสินค้าที่ค้นหา' : 'ยังไม่มีผลิตภัณฑ์ กด "ผลิตภัณฑ์/บริการใหม่" เพื่อเริ่มต้น') + (n ? '<div class="iv-pager">1 - ' + n + ' ของ ' + n + ' รายการ <span class="muted">‹ หน้า 1 ของ 1 ›</span></div>' : '');
 }
 
 /* ---- Tax ---- */

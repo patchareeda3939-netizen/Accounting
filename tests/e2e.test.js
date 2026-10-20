@@ -110,6 +110,7 @@ async function verify(email) {
     for (const id of [...document.querySelectorAll('.side-item')].map(e => e.id).filter(Boolean)) { const el = byId(id); if (el && el.offsetParent !== null) { el.click(); await wait(150); collect(id); closeModal && closeModal(); } }
     for (const k of [...document.querySelectorAll('.subnav-child')].map(e => e.dataset.childKey)) { const el = document.querySelector('.subnav-child[data-child-key="' + k + '"]'); if (el) { el.click(); await wait(80); collect(k); } }
     const d = STORE.documents[0]; if (d) { openDocDetail(d._id); await wait(300); collect('doc detail'); closeModal(); }
+    for (const [g, k] of [['accounting', 'recurring'], ['accounting', 'rules'], ['accounting', 'yearClose'], ['inventory', 'purchaseOrder'], ['alldocs', 'journals']]) { go(g, k); await wait(200); collect(g + ':' + k); }
     return [...found]; });
   ok('viewer: no visible create/edit/delete control on any page or document view', vSweep.length === 0, vSweep.slice(0, 10));
   ok('viewer: create button and quick actions hidden', await v.evaluate(() => byId('sidebarCreateBtn').offsetParent === null && document.querySelector('.quick-row').offsetParent === null));
@@ -265,7 +266,7 @@ async function verify(email) {
   const attDir = path.join(TMP, 'att'); fs.mkdirSync(attDir, { recursive: true });
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
   fs.writeFileSync(path.join(attDir, 'ใบเสร็จ.png'), PNG); fs.writeFileSync(path.join(attDir, 'note.txt'), 'หลักฐานการจ่าย 123');
-  await e.evaluate(() => { closeModal(); openDocForm('expense'); }); await e.fill('#f_party', 'ร้านแนบไฟล์'); await e.fill('#f_amount', '250');
+  await e.evaluate(() => { closeModal(); openDocForm('expense'); }); await e.fill('#f_party', 'ร้านแนบไฟล์'); await e.evaluate(() => { form.items = [{ name: 'ค่าบริการ', qty: 1, price: 250 }]; }); // expense form is itemized
   await e.setInputFiles('#attInput', [path.join(attDir, 'ใบเสร็จ.png'), path.join(attDir, 'note.txt')]);
   await e.waitForFunction(() => form && form.attachments.length === 2, null, { timeout: 15000 }).catch(() => {});
   ok('attachments upload to Firebase Storage from the document form', await e.evaluate(() => form.attachments.length === 2 && form.attachments.every(a => /^companies\/[^/]+\/files\/[a-z0-9]+$/.test(a.path) && a.path.indexOf(CUR_CO) > 0)), await e.evaluate(() => [form.attachments, byId('attMsg').textContent]));
@@ -336,6 +337,19 @@ async function verify(email) {
   ok('session persists after reload', await o.evaluate(() => FB_MODE && !!FB.user));
   await o.evaluate(() => toggleCoMenu()); await o.click('[data-coout]'); await o.waitForSelector('#auEmail', { timeout: 10000 });
   ok('logout returns to login screen', true);
+
+  // ---- year-end close (new in Artifact v107): the lock it sets goes through the audited path in Firebase mode
+  await e.evaluate(() => { closeModal(); go('accounting', 'yearClose'); }); await e.waitForTimeout(600);
+  const ycY = await e.evaluate(() => pageState.ycYear), ycEnd = await e.evaluate(y => fyRange(y)[1], ycY);
+  await e.evaluate(() => { const c = byId('ycLock'); if (c) c.checked = true; }); await e.evaluate(() => document.querySelector('.yc-run button').click()); await e.waitForTimeout(2500);
+  const yc1 = await e.evaluate(y => ({ lock: lockDate(), closed: !!ycCloseDoc(y) }), ycY);
+  ok('year-end close posts the closing entry and locks the year', yc1.closed && yc1.lock === ycEnd, [yc1, ycEnd]);
+  await e.evaluate(() => openUsersInfo()); await e.waitForSelector('#mbAudit', { timeout: 8000 });
+  ok('year-end lock is in the audit log', (await e.$$eval('#mbAudit tbody tr', rs => rs.map(r => r.textContent))).some(t => t.includes('ล็อกงวดบัญชี') && t.includes(ycEnd.split('-').reverse().join('/'))));
+  await e.evaluate(() => { closeModal(); go('accounting', 'yearClose'); }); await e.waitForTimeout(600);
+  await e.evaluate(async () => { const b = [...document.querySelectorAll('button')].find(x => x.textContent === 'ยกเลิกการปิดบัญชี'); b.click(); await new Promise(r => setTimeout(r, 100)); b.click(); }); await e.waitForTimeout(2500);
+  const yc2 = await e.evaluate(y => ({ lock: lockDate(), closed: !!ycCloseDoc(y) }), ycY);
+  ok('owner undoes year-end close: unlocks (audited) and removes the entry', !yc2.closed && yc2.lock === '', yc2);
 
   for (const [n, pg] of [['owner', o], ['editor', e], ['viewer', v], ['stranger', s]]) ok('no page errors: ' + n, pg.errs.length === 0, pg.errs);
   console.log(results.map(r => r.join('  ')).join('\n'));

@@ -33,6 +33,14 @@ src/part15.js      หลายบริษัท / สาขา
 src/part16.js      โครงการ / แผนก
 src/part17.js      อ่านเอกสาร OCR
 src/part18.js      ยอดยกมา
+src/part19.js      ใบสั่งซื้อ
+src/part20.js      รายการเกิดซ้ำ (สร้างเอกสารอัตโนมัติตามรอบ)
+src/part21.js      ที่คั่นหน้า (ปักหมุดเมนูที่ใช้บ่อย)
+src/part22.js      ปรับปรุงสต็อก
+src/part23.js      ฟอร์มสินค้า/บริการ
+src/part24.js      กฎจับคู่รายการ Statement ธนาคาร
+src/part25.js      ปิดบัญชีสิ้นปี
+src/part26.js      สมุดรายวัน / แยกประเภท
 dist/index.html    ไฟล์เว็บที่ประกอบแล้ว (เปิดในเบราว์เซอร์ได้เลย)
 dist/artifact.html สำหรับเผยแพร่เป็น Claude Artifact
 tests/             ชุดทดสอบอัตโนมัติ (ดูหัวข้อ ทดสอบ)
@@ -40,6 +48,7 @@ package.json       คำสั่ง build/test และเวอร์ชั�
 firestore.rules    กฎความปลอดภัยของฐานข้อมูล Firebase
 firebase.json      ค่าสำหรับ deploy rules และรัน Firebase Emulator
 ```
+ฟีเจอร์ตรงกับ Claude Artifact v107 (20/10/2026) รวมกับระบบ Login/สิทธิ์/ล็อกงวด/สำรองข้อมูลของ repo นี้
 
 ## วิธีใช้
 1. แก้ไฟล์ใน `src/` แล้วรัน `./build.sh`

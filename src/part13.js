@@ -80,7 +80,7 @@ async function downloadDocPdf(d, btn, html, fname) {
 }
 function openPrintViewer(d, html, fname) {
   ensureFormFonts();
-  html = html || (renderForm(Object.assign({}, d, { _copy:'original' }), styleFor(d.type)) + renderForm(Object.assign({}, d, { _copy:'copy' }), styleFor(d.type)));
+  html = html || (FORM_SPEC[d.type] ? renderForm(Object.assign({}, d, { _copy:'original' }), styleFor(d.type)) + renderForm(Object.assign({}, d, { _copy:'copy' }), styleFor(d.type)) : renderForm(Object.assign({}, d, { _copy:'internal' }), styleFor(d.type)));
   var ov = document.createElement('div');
   ov.className = 'att-viewer';
   ov.innerHTML = '<div class="att-vbox pv-box"><div class="att-vhead"><b>' + esc((d.typeLabel || 'เอกสาร') + ' ' + (d.docNo || '')) + '</b><span class="pv-btns"><button type="button" class="btn btn-dark" data-pv="print">🖨 พิมพ์</button> <button type="button" class="btn btn-outline" data-pv="pdf">⬇ PDF</button> <button type="button" class="btn btn-outline" data-pv="close">ปิด</button></span></div><div class="att-vbody pv-body">' + html + '</div></div>';
