@@ -93,6 +93,11 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   check('company menu opens on screen under the switcher', menu.right <= menu.w && menu.right > menu.w / 2 && menu.top > 40, menu);
   await fq.evaluate(() => toggleCoMenu());
 
+  REG('FEAT-04', 'ลบกล่อง "ข้อมูลติดต่อลูกค้า" ออกจากหน้าบัญชีและการตั้งค่า');
+  await fq.evaluate(() => go('settings', 'company')); await fq.waitForTimeout(400);
+  const coPage = await fq.textContent('#pageData');
+  check('customer contact box removed, company and legal sections still shown', !/ข้อมูลติดต่อลูกค้า/.test(coPage) && /ข้อมูลบริษัท/.test(coPage) && /ข้อมูลทางกฎหมาย/.test(coPage));
+
   REG('FEAT-02', 'กรองรายงานตามสาขา');
   await fq.evaluate(async () => {
     await putBranch({ code: '00001', name: 'สาขาหนึ่ง', active: true, createdAt: 1 });

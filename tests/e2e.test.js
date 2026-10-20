@@ -170,7 +170,7 @@ async function verify(email) {
   await e.evaluate(() => go('settings', 'company')); await e.waitForTimeout(800);
   const eUi = await e.evaluate(() => ({ banner: !!byId('coLegalLock'), edit: [...document.querySelectorAll('[data-coedit]')].map(b => b.dataset.coedit), bradd: !!document.querySelector('[data-bradd]') }));
   ok('editor: legal fields locked on company page', eUi.banner && !['name', 'legalName', 'taxId', 'legalAddress', 'businessType', 'vatRegistered', 'fiscalStart'].some(k => eUi.edit.includes(k)), eUi);
-  ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'custPhone', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
+  ok('editor: daily fields and branches editable on company page', ['address', 'phone', 'email', 'branch'].every(k => eUi.edit.includes(k)) && eUi.bradd, eUi);
   // ---- branches: editor adds/edits/deactivates; branch with history cannot be deleted by editor
   const addBranchUi = async (pg, code, name) => { await pg.click('[data-bradd]'); await pg.fill('#brCode', code); await pg.fill('#brName', name); await pg.fill('#brAddr', 'ที่อยู่ ' + name); await pg.click('#modalFoot >> text=บันทึก'); await pg.waitForTimeout(1200); };
   await addBranchUi(e, '00001', 'สาขาหนึ่ง'); await addBranchUi(e, '00002', 'สาขาสอง');
