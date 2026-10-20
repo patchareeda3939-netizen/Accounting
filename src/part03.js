@@ -1100,6 +1100,10 @@ async function getDownloads() {
   try { downloadsNs = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; } catch (e) { downloadsNs = null; }
   return downloadsNs;
 }
+// ใน Claude ใช้ downloads ของ Claude; บนเว็บปกติ (GitHub Pages) ดาวน์โหลดผ่านเบราว์เซอร์
+var FILE_MIME = { xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv:'text/csv', json:'application/json', pdf:'application/pdf' };
+var LOCAL_SAVER = { save: async function(o) { saveFileLocally(o.filename, o.data, FILE_MIME[String(o.filename).split('.').pop().toLowerCase()] || 'application/octet-stream'); } };
+async function getSaver() { return (await getDownloads()) || LOCAL_SAVER; }
 function coaExportRows(scope) {
   var list = scope === 'filtered' ? coaList() : scope === 'selected' ? STORE.accounts.filter(function(a) { return coaSelected[a._id]; }) : STORE.accounts.slice().sort(function(a, b) { return String(a.code).localeCompare(String(b.code)); });
   var bal = accountBalances();
@@ -1116,33 +1120,19 @@ async function openCoaExport() {
   if (!STORE.accounts.length) { showToast('ยังไม่มีบัญชีให้ส่งออก'); return; }
   var nSel = STORE.accounts.filter(function(a) { return coaSelected[a._id]; }).length;
   var nFil = coaList().length;
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var body = '<div class="field"><label for="expScope">บัญชีที่จะส่งออก</label><select id="expScope"><option value="all">ทั้งหมด (' + STORE.accounts.length + ' บัญชี)</option>' +
     (nFil !== STORE.accounts.length ? '<option value="filtered">ตามตัวกรองปัจจุบัน (' + nFil + ' บัญชี)</option>' : '') +
     (nSel ? '<option value="selected">เฉพาะที่เลือก (' + nSel + ' บัญชี)</option>' : '') + '</select></div>' +
     '<div class="field"><label for="expFmt">รูปแบบไฟล์</label><select id="expFmt"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (UTF-8)</option></select></div>' +
     '<p class="small muted" style="margin:0">ไฟล์ที่ได้ใช้รูปแบบเดียวกับเมนูนำเข้า จึงนำกลับเข้ามาได้ทันที</p>' +
-    (dl ? '' : '<div class="banner info">หน้านี้บันทึกไฟล์ลงเครื่องไม่ได้ในมุมมองนี้ คัดลอกข้อมูลด้านล่างไปวางใน Excel แทนได้</div><textarea id="expText" class="imp-text" rows="8" readonly></textarea>') +
     '<div class="form-error" id="formError" hidden></div>';
-  var buttons = [CANCEL_BTN];
-  if (dl) buttons.push({ label:'ส่งออก', cls:'btn-dark', onClick: function(btn) { doCoaExport(btn, dl); } });
-  else buttons.push({ label:'คัดลอก', cls:'btn-dark', onClick: function() {
-    var t = byId('expText');
-    navigator.clipboard.writeText(t.value).then(function() { showToast('คัดลอกแล้ว'); }, function() { t.select(); showToast('เลือกข้อความแล้ว กด Ctrl/Cmd+C เพื่อคัดลอก'); });
-  } });
-  openModal({ title:'ส่งออกผังบัญชี', body: body, focus:false, buttons: buttons, onMount: function() {
-    var t = byId('expText');
-    if (t) {
-      var fill = function() { t.value = coaExportRows(byId('expScope').value).map(function(r) { return r.join('\t'); }).join('\n'); };
-      byId('expScope').addEventListener('change', fill); fill();
-      byId('expFmt').closest('.field').hidden = true;
-    }
-  } });
+  openModal({ title:'ส่งออกผังบัญชี', body: body, focus:false, buttons: [CANCEL_BTN, { label:'ส่งออก', cls:'btn-dark', onClick: function(btn) { doCoaExport(btn, dl); } }] });
 }
 async function doCoaExport(btn, dl) {
   var rows = coaExportRows(byId('expScope').value);
   var fmt = byId('expFmt').value;
-  var name = 'ผังบัญชี-' + companyName() + '-' + todayStr();
+  var name = 'ผังบัญชี-' + companyName().replace(/[\\/:*?"<>|]/g, '_') + '-' + todayStr();
   btn.disabled = true;
   try {
     var data, filename;

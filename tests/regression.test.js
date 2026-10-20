@@ -12,7 +12,7 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
 
 (async () => {
   const pages = L.localPages();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ env: Object.assign({}, process.env, { LANG: 'C.UTF-8' }) }); // UTF-8 locale so Thai download file names survive
 
   /* ---------- โหมดเก็บข้อมูลในเบราว์เซอร์ (localStorage) ---------- */
   const p = await L.newPage(browser, pages.local);
@@ -135,6 +135,31 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   const ic = await fq.evaluate(() => lastReport.rows.filter(x => !x.g).map(x => strip2(x[3])));
   check('intercompany reconciliation matches both sides', ic.length === 3 && ic.every(t => t === 'ตรงกัน'), ic);
   check('no page errors (branch filter, group reports)', fq.errs.length === 0, fq.errs);
+
+  REG('FEAT-06', 'ส่งออกผังบัญชีบนเว็บปกติ (GitHub Pages) ได้แค่คัดลอกข้อความ ไม่ได้ไฟล์');
+  const cx = await L.newPage(browser, pages.local);
+  await cx.evaluate(async () => { await loadStandardCoa(); }); await cx.waitForTimeout(500);
+  const nAcc = await cx.evaluate(() => STORE.accounts.length);
+  const coaFiles = {};
+  for (const fmt of ['xlsx', 'csv']) {
+    await cx.evaluate(() => openCoaExport()); await cx.waitForSelector('#expFmt');
+    await cx.selectOption('#expFmt', fmt);
+    const [d] = await Promise.all([cx.waitForEvent('download', { timeout: 10000 }), cx.click('#modalFoot >> text=ส่งออก')]);
+    coaFiles[fmt] = await d.path();
+    check(fmt + ': chart of accounts downloads as a file', d.suggestedFilename().endsWith('.' + fmt) && fs.statSync(coaFiles[fmt]).size > 500, d.suggestedFilename());
+    await cx.waitForTimeout(300);
+  }
+  const ci = await L.newPage(browser, pages.local);
+  for (const fmt of ['xlsx', 'csv']) {
+    await ci.evaluate(async () => { for (const a of STORE.accounts.slice()) await delRec('accounts', a._id); }); await ci.waitForTimeout(300);
+    await ci.evaluate(() => openCoaImport()); await ci.waitForSelector('#impFile');
+    await ci.setInputFiles('#impFile', { name: 'coa.' + fmt, mimeType: fmt === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: fs.readFileSync(coaFiles[fmt]) }); await ci.waitForTimeout(1200);
+    const pv = await ci.evaluate(() => ({ n: coaImportRows.length, bad: coaImportRows.filter(r => r.err).map(r => r.code + ':' + r.err) }));
+    await ci.click('#modalFoot >> text=นำเข้า'); await ci.waitForTimeout(1500);
+    const got = await ci.evaluate(() => ({ n: STORE.accounts.length, cash: (STORE.accounts.find(a => a.code === '1110') || {}).name }));
+    check(fmt + ': exported file imports back with every account', pv.n === nAcc && !pv.bad.length && got.n === nAcc && !!got.cash, { nAcc, pv, got });
+  }
+  check('no page errors (chart of accounts export/import)', cx.errs.length === 0 && ci.errs.length === 0, cx.errs.concat(ci.errs));
 
   REG('FEAT-05', 'นำเข้าสมุดรายวัน / GL จากไฟล์ CSV');
   const jq = await L.newPage(browser, pages.local);

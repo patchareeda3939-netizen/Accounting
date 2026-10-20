@@ -572,13 +572,8 @@ function strip2(h) { var d = document.createElement('div'); d.innerHTML = String
 async function exportReport() {
   var r = lastReport; if (!r) return;
   var rows = [r.cols.map(function(c) { return c[0]; })].concat(r.rows.map(function(x) { return x.g ? [x.g] : (x.t || x.c || x).map(strip2); }));
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var name = REPORT_NAME[pageState.repId] + '-' + todayStr();
-  if (!dl) {
-    openModal({ title:'ส่งออกรายงาน', focus:false, body:'<div class="banner info">หน้านี้บันทึกไฟล์ลงเครื่องไม่ได้ในมุมมองนี้ คัดลอกข้อมูลด้านล่างไปวางใน Excel แทนได้</div><textarea class="imp-text" rows="10" readonly id="repCopy">' + esc(rows.map(function(r) { return r.join('\t'); }).join('\n')) + '</textarea>',
-      buttons:[{ label:'ปิด', onClick: closeModal }, { label:'คัดลอก', cls:'btn-dark', onClick: function() { var t = byId('repCopy'); navigator.clipboard.writeText(t.value).then(function() { showToast('คัดลอกแล้ว'); }, function() { t.select(); showToast('กด Ctrl/Cmd+C เพื่อคัดลอก'); }); } }] });
-    return;
-  }
   try {
     await loadXlsxLib();
     var ws = XLSX.utils.aoa_to_sheet([[companyName()], [REPORT_NAME[pageState.repId]], []].concat(rows));

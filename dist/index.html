@@ -3704,6 +3704,10 @@ async function getDownloads() {
   try { downloadsNs = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; } catch (e) { downloadsNs = null; }
   return downloadsNs;
 }
+// ใน Claude ใช้ downloads ของ Claude; บนเว็บปกติ (GitHub Pages) ดาวน์โหลดผ่านเบราว์เซอร์
+var FILE_MIME = { xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv:'text/csv', json:'application/json', pdf:'application/pdf' };
+var LOCAL_SAVER = { save: async function(o) { saveFileLocally(o.filename, o.data, FILE_MIME[String(o.filename).split('.').pop().toLowerCase()] || 'application/octet-stream'); } };
+async function getSaver() { return (await getDownloads()) || LOCAL_SAVER; }
 function coaExportRows(scope) {
   var list = scope === 'filtered' ? coaList() : scope === 'selected' ? STORE.accounts.filter(function(a) { return coaSelected[a._id]; }) : STORE.accounts.slice().sort(function(a, b) { return String(a.code).localeCompare(String(b.code)); });
   var bal = accountBalances();
@@ -3720,33 +3724,19 @@ async function openCoaExport() {
   if (!STORE.accounts.length) { showToast('ยังไม่มีบัญชีให้ส่งออก'); return; }
   var nSel = STORE.accounts.filter(function(a) { return coaSelected[a._id]; }).length;
   var nFil = coaList().length;
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var body = '<div class="field"><label for="expScope">บัญชีที่จะส่งออก</label><select id="expScope"><option value="all">ทั้งหมด (' + STORE.accounts.length + ' บัญชี)</option>' +
     (nFil !== STORE.accounts.length ? '<option value="filtered">ตามตัวกรองปัจจุบัน (' + nFil + ' บัญชี)</option>' : '') +
     (nSel ? '<option value="selected">เฉพาะที่เลือก (' + nSel + ' บัญชี)</option>' : '') + '</select></div>' +
     '<div class="field"><label for="expFmt">รูปแบบไฟล์</label><select id="expFmt"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (UTF-8)</option></select></div>' +
     '<p class="small muted" style="margin:0">ไฟล์ที่ได้ใช้รูปแบบเดียวกับเมนูนำเข้า จึงนำกลับเข้ามาได้ทันที</p>' +
-    (dl ? '' : '<div class="banner info">หน้านี้บันทึกไฟล์ลงเครื่องไม่ได้ในมุมมองนี้ คัดลอกข้อมูลด้านล่างไปวางใน Excel แทนได้</div><textarea id="expText" class="imp-text" rows="8" readonly></textarea>') +
     '<div class="form-error" id="formError" hidden></div>';
-  var buttons = [CANCEL_BTN];
-  if (dl) buttons.push({ label:'ส่งออก', cls:'btn-dark', onClick: function(btn) { doCoaExport(btn, dl); } });
-  else buttons.push({ label:'คัดลอก', cls:'btn-dark', onClick: function() {
-    var t = byId('expText');
-    navigator.clipboard.writeText(t.value).then(function() { showToast('คัดลอกแล้ว'); }, function() { t.select(); showToast('เลือกข้อความแล้ว กด Ctrl/Cmd+C เพื่อคัดลอก'); });
-  } });
-  openModal({ title:'ส่งออกผังบัญชี', body: body, focus:false, buttons: buttons, onMount: function() {
-    var t = byId('expText');
-    if (t) {
-      var fill = function() { t.value = coaExportRows(byId('expScope').value).map(function(r) { return r.join('\t'); }).join('\n'); };
-      byId('expScope').addEventListener('change', fill); fill();
-      byId('expFmt').closest('.field').hidden = true;
-    }
-  } });
+  openModal({ title:'ส่งออกผังบัญชี', body: body, focus:false, buttons: [CANCEL_BTN, { label:'ส่งออก', cls:'btn-dark', onClick: function(btn) { doCoaExport(btn, dl); } }] });
 }
 async function doCoaExport(btn, dl) {
   var rows = coaExportRows(byId('expScope').value);
   var fmt = byId('expFmt').value;
-  var name = 'ผังบัญชี-' + companyName() + '-' + todayStr();
+  var name = 'ผังบัญชี-' + companyName().replace(/[\\/:*?"<>|]/g, '_') + '-' + todayStr();
   btn.disabled = true;
   try {
     var data, filename;
@@ -4915,13 +4905,8 @@ function strip2(h) { var d = document.createElement('div'); d.innerHTML = String
 async function exportReport() {
   var r = lastReport; if (!r) return;
   var rows = [r.cols.map(function(c) { return c[0]; })].concat(r.rows.map(function(x) { return x.g ? [x.g] : (x.t || x.c || x).map(strip2); }));
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var name = REPORT_NAME[pageState.repId] + '-' + todayStr();
-  if (!dl) {
-    openModal({ title:'ส่งออกรายงาน', focus:false, body:'<div class="banner info">หน้านี้บันทึกไฟล์ลงเครื่องไม่ได้ในมุมมองนี้ คัดลอกข้อมูลด้านล่างไปวางใน Excel แทนได้</div><textarea class="imp-text" rows="10" readonly id="repCopy">' + esc(rows.map(function(r) { return r.join('\t'); }).join('\n')) + '</textarea>',
-      buttons:[{ label:'ปิด', onClick: closeModal }, { label:'คัดลอก', cls:'btn-dark', onClick: function() { var t = byId('repCopy'); navigator.clipboard.writeText(t.value).then(function() { showToast('คัดลอกแล้ว'); }, function() { t.select(); showToast('กด Ctrl/Cmd+C เพื่อคัดลอก'); }); } }] });
-    return;
-  }
   try {
     await loadXlsxLib();
     var ws = XLSX.utils.aoa_to_sheet([[companyName()], [REPORT_NAME[pageState.repId]], []].concat(rows));
@@ -5052,8 +5037,8 @@ function openImportHub() {
 }
 // branches first: restored documents may refer to them
 var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
-function saveFileLocally(filename, text, type) {
-  var a = document.createElement('a'), url = URL.createObjectURL(new Blob([text], { type: type || 'application/json' }));
+function saveFileLocally(filename, data, type) {
+  var a = document.createElement('a'), url = URL.createObjectURL(new Blob([data], { type: type || 'application/json' }));
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
   setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
@@ -5118,7 +5103,7 @@ function openRestore() {
     } });
 }
 async function exportAllData() {
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var sheets = [
     ['เอกสาร', ['วันที่','ชนิด','เลขที่','คู่ค้า','ก่อนภาษี','VAT','ยอดรวม','หัก ณ ที่จ่าย','สถานะ'], STORE.documents.map(function(d) { return [d.date, d.typeLabel, d.docNo, d.party, d.subtotal, d.vat, d.total, d.wht, strip2(statusText(d))]; })],
     ['ผู้ติดต่อ', ['ชื่อ','ประเภท','เลขผู้เสียภาษี','โทรศัพท์','อีเมล','ที่อยู่'], STORE.contacts.map(function(c) { return [c.name, c.kind, c.taxId, c.phone, c.email, c.address]; })],
@@ -5126,7 +5111,6 @@ async function exportAllData() {
     ['ผังบัญชี', ['รหัส','ชื่อ','ประเภทบัญชี','ประเภทรายละเอียด'], STORE.accounts.map(function(a) { return [a.code, a.name, subtypeLabel(accSubtype(a)), a.detailType]; })],
     ['พนักงาน', ['ชื่อ','ตำแหน่ง','โทรศัพท์','อีเมล','เริ่มงาน'], STORE.employees.map(function(e) { return [e.name, e.position, e.phone, e.email, e.startDate]; })]
   ];
-  if (!dl) { showToast('หน้านี้บันทึกไฟล์ไม่ได้ในมุมมองนี้ ใช้ส่งออกจากแต่ละรายงานแทน'); return; }
   try {
     await loadXlsxLib();
     var wb = XLSX.utils.book_new();

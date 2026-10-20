@@ -98,8 +98,8 @@ function openImportHub() {
 }
 // branches first: restored documents may refer to them
 var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
-function saveFileLocally(filename, text, type) {
-  var a = document.createElement('a'), url = URL.createObjectURL(new Blob([text], { type: type || 'application/json' }));
+function saveFileLocally(filename, data, type) {
+  var a = document.createElement('a'), url = URL.createObjectURL(new Blob([data], { type: type || 'application/json' }));
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
   setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
@@ -164,7 +164,7 @@ function openRestore() {
     } });
 }
 async function exportAllData() {
-  var dl = await getDownloads();
+  var dl = await getSaver();
   var sheets = [
     ['เอกสาร', ['วันที่','ชนิด','เลขที่','คู่ค้า','ก่อนภาษี','VAT','ยอดรวม','หัก ณ ที่จ่าย','สถานะ'], STORE.documents.map(function(d) { return [d.date, d.typeLabel, d.docNo, d.party, d.subtotal, d.vat, d.total, d.wht, strip2(statusText(d))]; })],
     ['ผู้ติดต่อ', ['ชื่อ','ประเภท','เลขผู้เสียภาษี','โทรศัพท์','อีเมล','ที่อยู่'], STORE.contacts.map(function(c) { return [c.name, c.kind, c.taxId, c.phone, c.email, c.address]; })],
@@ -172,7 +172,6 @@ async function exportAllData() {
     ['ผังบัญชี', ['รหัส','ชื่อ','ประเภทบัญชี','ประเภทรายละเอียด'], STORE.accounts.map(function(a) { return [a.code, a.name, subtypeLabel(accSubtype(a)), a.detailType]; })],
     ['พนักงาน', ['ชื่อ','ตำแหน่ง','โทรศัพท์','อีเมล','เริ่มงาน'], STORE.employees.map(function(e) { return [e.name, e.position, e.phone, e.email, e.startDate]; })]
   ];
-  if (!dl) { showToast('หน้านี้บันทึกไฟล์ไม่ได้ในมุมมองนี้ ใช้ส่งออกจากแต่ละรายงานแทน'); return; }
   try {
     await loadXlsxLib();
     var wb = XLSX.utils.book_new();

@@ -50,6 +50,7 @@ async function newPage(browser, url, waitFor) {
   await p.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => {
     const u = new URL(r.request().url());
     if (u.hostname === 'www.gstatic.com' && u.pathname.startsWith('/firebasejs/')) return r.fulfill({ path: FBDIR + path.basename(u.pathname), contentType: 'text/javascript' });
+    if (u.hostname === 'cdnjs.cloudflare.com' && u.pathname === '/ajax/libs/xlsx/0.18.5/xlsx.full.min.js') return r.fulfill({ path: require.resolve('xlsx/dist/xlsx.full.min.js'), contentType: 'text/javascript' });
     return r.abort();
   });
   await p.goto(url);
