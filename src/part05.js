@@ -89,10 +89,11 @@ function openFeedback() {
 STORE.feedback = STORE.feedback || [];
 function openImportHub() {
   openModal({ title:'นำเข้าข้อมูล', focus:false, body: '<p class="small muted" style="margin:0">เลือกข้อมูลที่ต้องการนำเข้า</p><div class="toolbar" style="flex-direction:column;align-items:stretch">' +
-    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
+    '<button type="button" class="btn" id="impCoa">ผังบัญชี (CSV / Excel)</button><button type="button" class="btn" id="impJournal">สมุดรายวัน / GL (CSV / Excel)</button><button type="button" class="btn" id="impBackup">กู้คืนจากไฟล์สำรองข้อมูล (.json)</button></div>',
     buttons:[{ label:'ปิด', onClick: closeModal }], onMount: function() {
       byId('impCoa').addEventListener('click', function() { go('accounting', 'coa'); openCoaImport(); });
       byId('impBackup').addEventListener('click', openRestore);
+      byId('impJournal').addEventListener('click', function() { closeModal(); go('settings', 'import'); openImportWizard('journal'); });
     } });
 }
 // branches first: restored documents may refer to them

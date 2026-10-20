@@ -262,6 +262,12 @@ async function verify(email) {
   ok('new primary sees transfer buttons', (await e.$$('[data-mbxfer]')).length >= 1);
   await e.evaluate(() => closeModal());
 
+  // ---- journal / GL import goes through the Firestore rules like any other entry
+  await e.evaluate(() => { closeModal(); go('settings', 'import'); openImportWizard('journal'); });
+  await e.setInputFiles('#impWFile', { name: 'gl.csv', mimeType: 'text/csv', buffer: Buffer.from('เลขที่รายการ,วันที่,คำอธิบายรายการ,รหัสบัญชี,เดบิต,เครดิต\nGL-E2E,' + new Date().toISOString().slice(0, 10) + ',นำเข้าทดสอบ,1120,750,\nGL-E2E,' + new Date().toISOString().slice(0, 10) + ',นำเข้าทดสอบ,1110,,750\n') });
+  await e.waitForSelector('#impPrev .banner'); await e.click('#modalFoot >> text=นำเข้า'); await e.waitForTimeout(1500);
+  ok('journal import saves to Firestore', await e.evaluate(() => { const d = STORE.documents.find(x => x.docNo === 'GL-E2E'); return !!d && d.type === 'journalEntry' && d.items.length === 2 && d.total === 750; }));
+
   // ---- attachments in Firebase mode (Firebase Storage + storage.rules)
   const attDir = path.join(TMP, 'att'); fs.mkdirSync(attDir, { recursive: true });
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
