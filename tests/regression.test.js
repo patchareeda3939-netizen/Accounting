@@ -84,6 +84,53 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
     check(mode + ': no page errors', q.errs.length === 0, q.errs);
   }
 
+  REG('FEAT-01', 'ปุ่มเลือกบริษัทอยู่มุมขวาบน');
+  const fq = await L.newPage(browser, pages.local);
+  const pill = await fq.evaluate(() => { const r = byId('companyPill').getBoundingClientRect(); return { inRight: !!byId('companyPill').closest('.topbar-icons'), x: r.left, w: innerWidth }; });
+  check('company switcher sits in the right-hand group of the top bar', pill.inRight && pill.x > pill.w / 2, pill);
+  await fq.evaluate(() => toggleCoMenu()); await fq.waitForTimeout(200);
+  const menu = await fq.evaluate(() => { const r = byId('coMenu').getBoundingClientRect(); return { right: r.right, w: innerWidth, top: r.top }; });
+  check('company menu opens on screen under the switcher', menu.right <= menu.w && menu.right > menu.w / 2 && menu.top > 40, menu);
+  await fq.evaluate(() => toggleCoMenu());
+
+  REG('FEAT-02', 'กรองรายงานตามสาขา');
+  await fq.evaluate(async () => {
+    await putBranch({ code: '00001', name: 'สาขาหนึ่ง', active: true, createdAt: 1 });
+    const je = (no, br, amt) => addRec('documents', { type: 'journalEntry', typeLabel: 'สมุดรายวันทั่วไป', group: 'other', docNo: no, party: 'ขาย', date: todayStr(), items: [{ account: '1110', debit: amt, credit: 0 }, { account: '4110', debit: 0, credit: amt }], total: amt, net: amt, status: 'done', extra: br ? { branch: br } : {}, createdAt: Date.now() });
+    await je('BR-HQ', '', 700); await je('BR-01', '00001', 300);
+    pageState.repPeriod = 'all'; pageState.repBranch = ''; openReport('pl');
+  });
+  await fq.waitForTimeout(400);
+  const income = () => fq.evaluate(() => { const row = lastReport.rows.find(x => !x.g && /4110/.test((x.t || x.c || x)[0])); return row ? strip2((row.t || row.c || row)[1]) : null; });
+  const allBr = await income();
+  check('branch filter is shown on reports', await fq.evaluate(() => !!byId('repBranch') && [...byId('repBranch').options].map(o => o.value).join() === ',00000,00001'));
+  await fq.selectOption('#repBranch', '00001'); await fq.waitForTimeout(400);
+  const br1 = await income(), title1 = await fq.textContent('.rep-co');
+  await fq.selectOption('#repBranch', '00000'); await fq.waitForTimeout(400);
+  const hq = await income();
+  check('report filtered to one branch', /1,000/.test(allBr) && /300/.test(br1) && /700/.test(hq) && /สาขาที่ 00001/.test(title1), [allBr, br1, hq, title1]);
+  check('all documents are back after filtering', await fq.evaluate(() => STORE.documents.length) >= 2);
+
+  REG('FEAT-03', 'งบรวมหลายบริษัท ตัดรายการระหว่างกัน');
+  await fq.evaluate(() => openNewCompany()); await fq.fill('#ncName', 'บริษัท ลูก จำกัด');
+  await fq.click('#modalFoot >> text=สร้างและสลับไปบริษัทนี้'); await fq.waitForTimeout(1200);
+  await fq.evaluate(async () => {
+    // child company buys a 1,000 service from the parent; the parent books it as revenue
+    await addRec('documents', { type: 'journalEntry', typeLabel: 'สมุดรายวันทั่วไป', group: 'other', docNo: 'IC-C', party: 'บริษัทของฉัน', date: todayStr(), items: [{ account: '5290', debit: 1000, credit: 0 }, { account: '2110', debit: 0, credit: 1000 }], total: 1000, net: 1000, status: 'done', extra: {}, createdAt: Date.now() });
+    switchCompany('main');
+    await addRec('documents', { type: 'journalEntry', typeLabel: 'สมุดรายวันทั่วไป', group: 'other', docNo: 'IC-P', party: 'บริษัท ลูก จำกัด', date: todayStr(), items: [{ account: '1130', debit: 1000, credit: 0 }, { account: '4110', debit: 0, credit: 1000 }], total: 1000, net: 1000, status: 'done', extra: {}, createdAt: Date.now() });
+    pageState.repBranch = ''; pageState.repPeriod = 'all'; openReport('grpPL');
+  });
+  await fq.waitForTimeout(1200);
+  const gpl = await fq.evaluate(() => ({ cols: lastReport.cols.map(c => c[0]), net: (lastReport.rows.find(x => x.t && /กำไร \(ขาดทุน\) สุทธิ/.test(x.t[0])) || {}).t, rev: (lastReport.rows.find(x => !x.g && !x.t && /4110/.test(x[0])) || []).map(strip2), title: document.querySelector('.rep-co').textContent }));
+  check('group P&L has a column per company plus elimination and total', JSON.stringify(gpl.cols.slice(1)) === JSON.stringify(['บริษัทของฉัน', 'บริษัท ลูก จำกัด', 'ตัดรายการระหว่างกัน', 'งบรวม']), gpl.cols);
+  check('intercompany revenue is eliminated (parent 1,000 own sales + 1,000 to the child -> 1,000 group sales)', /^฿2,000\.00$/.test(gpl.rev[1]) && /^[−-]฿1,000\.00$/.test(gpl.rev[3]) && /^฿1,000\.00$/.test(gpl.rev[4]), gpl.rev);
+  check('group report title names the group', /กลุ่มบริษัท \(2 บริษัท\)/.test(gpl.title), gpl.title);
+  await fq.evaluate(() => openReport('grpIC')); await fq.waitForTimeout(800);
+  const ic = await fq.evaluate(() => lastReport.rows.filter(x => !x.g).map(x => strip2(x[3])));
+  check('intercompany reconciliation matches both sides', ic.length === 3 && ic.every(t => t === 'ตรงกัน'), ic);
+  check('no page errors (branch filter, group reports)', fq.errs.length === 0, fq.errs);
+
   /* ---------- Firebase (Emulator) ---------- */
   await L.resetEmulators();
   const app = await L.startFirebaseApp();
