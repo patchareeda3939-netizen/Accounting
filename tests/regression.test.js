@@ -214,6 +214,11 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   check('bulk: move to pending, then claim in a chosen month', s9.sep === 140 && s9.aug === 0 && s9.v1155 === 0, s9);
   const rec9 = await iv.evaluate(() => ['2026-08', '2026-09', '2026-10'].map(ym => round2(sumLines(linesIn(SYS.vatIn, ym), 'dr') - sumLines(linesIn(SYS.vatIn, ym), 'cr')) + '=' + vatSummary(ym).inp));
   check('month-end close: input VAT in the ledger matches the VAT return each month', rec9.every(x => x.split('=')[0] === x.split('=')[1]), rec9);
+  REG('REG-17', 'ที่คั่นหน้าในแถบซ้ายใช้ไอคอนเดียวกันหมด ไม่ตามหน้าที่เลือก');
+  const pin17 = await iv.evaluate(() => { pinSet(['accounting:bankTx', 'accounting:receiptCapture', 'inventory:stock', 'tax:overview', 'tax:inputVat']); renderPins(); return { rail: [...document.querySelectorAll('#sidePins svg')].map(x => x.innerHTML), noIcon: pinPages().filter(x => pinIcon(x.id).indexOf(PIN_BOOKMARK) >= 0).map(x => x.id) }; });
+  check('each pinned page shows its own icon', pin17.rail.length === 5 && new Set(pin17.rail).size === 5, pin17.rail.length);
+  check('every page has an icon (no generic bookmark)', pin17.noIcon.length === 0, pin17.noIcon);
+  await iv.evaluate(() => pinSet([]));
   check('no page errors (input VAT)', iv.errs.length === 0, iv.errs);
 
   REG('FEAT-06', 'ส่งออกผังบัญชีบนเว็บปกติ (GitHub Pages) ได้แค่คัดลอกข้อความ ไม่ได้ไฟล์');
