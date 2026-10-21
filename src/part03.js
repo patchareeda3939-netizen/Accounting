@@ -155,6 +155,7 @@ var SUBNAV_ITEMS = [
   { key:'tax',        label:'ภาษี', color:'#B3402A', icon:'🧾', children: [
       { key:'overview', label:'ภาพรวม' },
       { key:'monthly', label:'รายงานภาษีรายเดือน' },
+      { key:'inputVat', label:'จัดการเอกสารภาษีซื้อ' },
       { key:'wht', label:'หนังสือรับรอง 50 ทวิ' }
     ] },
   { key:'reports',    label:'รายงาน', color:'#5B4B8A', icon:'📊', children: [
@@ -307,6 +308,7 @@ function renderPage() {
   else if (pid === 'sales:overview') shell = salesOverviewShell();
   else if (pid === 'inventory:overview') shell = invOverviewShell();
   else if (pid === 'tax:overview') shell = taxOvShell();
+  else if (pid === 'tax:inputVat') shell = ivShell();
   else if (pid === 'settings:forms') shell = formsShell();
   else if (pid === 'settings:company') shell = companyPageShell();
   else if (pid === 'settings:import') shell = importShell();
@@ -351,6 +353,7 @@ function refreshPageData() {
   else if (pid === 'accounting:reconcile') html = reconData();
   else if (pid === 'accounting:monthClose') html = monthCloseData();
   else if (pid === 'tax:wht') html = whtListData();
+  else if (pid === 'tax:inputVat') html = ivData();
   else if (pid === 'inventory:purchaseOrder') html = poData();
   else if (pid === 'accounting:recurring') html = recurData();
   else if (pid === 'accounting:rules') html = rulesData();
@@ -1305,7 +1308,7 @@ function taxShell() {
 /* ---- Tax overview (VAT returns) ---- */
 pageState.taxTab = 'returns'; pageState.taxFilter = '';
 function vatSummary(ym) {
-  var inMonth = taxDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && d.vat; });
+  var inMonth = vatDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && d.vat; });
   var out = round2(inMonth.filter(function(d) { return docFlow(d) === 'rev'; }).reduce(function(s, d) { return s + d.vat * docSign(d); }, 0));
   var inp = round2(inMonth.filter(function(d) { return docFlow(d) === 'exp'; }).reduce(function(s, d) { return s + d.vat * docSign(d); }, 0));
   var ret = taxReturn(ym);
@@ -1420,12 +1423,12 @@ function openRowMenu(anchor, ym) {
   m.style.left = Math.max(8, r.right - m.offsetWidth) + 'px';
   m.querySelector('button').focus();
 }
-function periodDocs(ym) { return taxDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d); }); }
+function periodDocs(ym) { return vatDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d); }); }
 function docTable(list, withVat) {
   var tb = 0, tv = 0;
   var rows = list.map(function(d) {
     var sg = docSign(d), b = docAmountExVat(d) * sg, v = (d.vat || 0) * sg; tb += b; tv += v;
-    return '<tr class="row-link" data-docm="' + esc(d._id) + '"><td class="num">' + fmtDateNum(d.date) + '</td><td class="docno">' + esc(d.docNo || '') + '</td><td>' + esc(d.typeLabel || '') + '</td><td>' + esc(d.party || '') + '</td><td class="r">' + fmtMoney(b) + '</td>' + (withVat ? '<td class="r">' + fmtMoney(v) + '</td>' : '') + '</tr>';
+    return '<tr class="row-link" data-docm="' + esc(d._id) + '"><td class="num">' + fmtDateNum(d._docDate || d.date) + '</td><td class="docno">' + esc(d.docNo || '') + '</td><td>' + esc(d.typeLabel || '') + '</td><td>' + esc(d.party || '') + '</td><td class="r">' + fmtMoney(b) + '</td>' + (withVat ? '<td class="r">' + fmtMoney(v) + '</td>' : '') + '</tr>';
   }).join('');
   return '<div class="items-wrap"><table class="data-table"><thead><tr><th>วันที่</th><th>เลขที่</th><th>ชนิด</th><th>คู่ค้า</th><th class="r">มูลค่า</th>' + (withVat ? '<th class="r">VAT</th>' : '') + '</tr></thead><tbody>' +
     (rows || '<tr><td colspan="6" class="empty-hint">ไม่มีรายการ</td></tr>') + '</tbody>' + (rows ? '<tfoot><tr><td colspan="4">รวม</td><td class="r">' + fmtMoney(tb) + '</td>' + (withVat ? '<td class="r">' + fmtMoney(tv) + '</td>' : '') + '</tr></tfoot>' : '') + '</table></div>';
@@ -1469,10 +1472,10 @@ function openByTaxCode(ym) {
 function openTaxReturn(ym) {
   var v = vatSummary(ym), filed = v.ret && v.ret.filedDate;
   var line = function(no, label, amt, strong) { return '<tr' + (strong ? ' style="font-weight:700"' : '') + '><td class="num muted">' + no + '</td><td>' + label + '</td><td class="r">' + fmtMoney(amt) + '</td></tr>'; };
-  var sales = taxDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d) === 'rev'; });
+  var sales = vatDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d) === 'rev'; });
   var base = round2(sales.reduce(function(s, d) { return s + docAmountExVat(d) * docSign(d); }, 0));
   var zero = round2(sales.filter(function(d) { return !d.vat; }).reduce(function(s, d) { return s + docAmountExVat(d) * docSign(d); }, 0));
-  var purch = round2(taxDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d) === 'exp' && d.vat; }).reduce(function(s, d) { return s + docAmountExVat(d) * docSign(d); }, 0));
+  var purch = round2(vatDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d) === 'exp' && d.vat; }).reduce(function(s, d) { return s + docAmountExVat(d) * docSign(d); }, 0));
   var body = '<p class="small muted" style="margin:0">สรุปตามแบบ ภ.พ.30 งวด ' + monthLabel(ym, true) + ' ใช้กรอกในระบบยื่นแบบของกรมสรรพากร</p>' +
     '<div class="items-wrap"><table class="data-table"><tbody>' +
     line('1', 'ยอดขายในเดือนนี้', base) + line('2', 'หัก ยอดขายที่ไม่ต้องเสียภาษี / ไม่มี VAT', zero) + line('4', 'ยอดขายที่ต้องเสียภาษี', round2(base - zero)) +
@@ -1529,7 +1532,7 @@ function taxData() {
   var ym = pageState.taxMonth || todayStr().slice(0,7);
   var inMonth = taxDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym; });
   var outDocs = inMonth.filter(function(d) { return docFlow(d) === 'rev' && d.vat; });
-  var inDocs = inMonth.filter(function(d) { return docFlow(d) === 'exp' && d.vat; });
+  var inDocs = vatDocs().filter(function(d) { return (d.date || '').slice(0,7) === ym && docFlow(d) === 'exp' && d.vat; });
   var outVat = round2(outDocs.reduce(function(s, d) { return s + d.vat * docSign(d); }, 0));
   var inVat = round2(inDocs.reduce(function(s, d) { return s + d.vat * docSign(d); }, 0));
   var pay = round2(outVat - inVat);
@@ -1543,7 +1546,7 @@ function taxData() {
       list.map(function(d) {
         var c = STORE.contacts.find(function(c) { return c._id === d.contactId || c.name === d.party; });
         var s = docSign(d);
-        return '<tr class="row-link" tabindex="0" data-doc="' + esc(d._id) + '"><td style="white-space:nowrap">' + fmtDate(d.date) + '</td><td class="docno">' + esc((d.extra && d.extra.supInvNo) || d.docNo) + ((d.extra && d.extra.supInvNo) ? '<div class="small muted">' + esc(d.docNo) + '</div>' : '') + '</td><td>' + esc(d.party) + (s < 0 ? ' <span class="small muted">(' + esc(d.typeLabel) + ')</span>' : '') + '</td><td class="num small">' + esc(c && c.taxId || '-') + '</td><td class="r">' + fmtMoney(d.subtotal * s) + '</td><td class="r">' + fmtMoney(d.vat * s) + '</td></tr>';
+        return '<tr class="row-link" tabindex="0" data-doc="' + esc(d._id) + '"><td style="white-space:nowrap">' + fmtDate(d._docDate || d.date) + '</td><td class="docno">' + esc((d.extra && d.extra.supInvNo) || d.docNo) + ((d.extra && d.extra.supInvNo) ? '<div class="small muted">' + esc(d.docNo) + '</div>' : '') + '</td><td>' + esc(d.party) + (s < 0 ? ' <span class="small muted">(' + esc(d.typeLabel) + ')</span>' : '') + '</td><td class="num small">' + esc(c && c.taxId || '-') + '</td><td class="r">' + fmtMoney(d.subtotal * s) + '</td><td class="r">' + fmtMoney(d.vat * s) + '</td></tr>';
       }).join(''), empty);
   }
   h += '<div class="page-block"><h2>รายงานภาษีขาย</h2>' + vatTable(outDocs, 'ไม่มีเอกสารขายที่มี VAT ในเดือนนี้') + '</div>';
