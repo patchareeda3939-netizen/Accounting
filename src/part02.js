@@ -454,7 +454,7 @@ function openDocForm(typeKey, doc, prefill) {
   if (def.action === 'product') return openRecordForm('products', null, { kind:'goods' });
   if (def.action === 'account') return openRecordForm('accounts', null, { accType:'expense' });
   if (typeKey === 'inventoryAdjust' && typeof openInvAdjForm === 'function') return openInvAdjForm(doc || null, prefill && prefill.party);
-  form = { type: typeKey, doc: doc || null };
+  form = { type: typeKey, doc: doc || null, keep: (!doc && prefill && prefill._keep) || null };
   var src = doc || prefill;
   form.items = (src && def.template === 'itemized' && src.items && src.items.length) ? clone(src.items)
     : (src && def.template === 'itemized' && (src.subtotal || src.total)) ? [{ name: (src.extra && (src.extra.expCategory || src.extra.incomeCat)) || '', qty:1, price: Number(src.vatMode === 'inclusive' ? src.total : (src.subtotal != null ? src.subtotal : src.total)) || 0 }]
@@ -736,7 +736,9 @@ async function saveDoc(btn) {
   var date = byId('f_date').value || todayStr();
   var _lk = (typeof lockDate === 'function') ? lockDate() : '';
   if (_lk && (date <= _lk || (form.doc && (form.doc.date || '') <= _lk))) return fail('งวดบัญชีถึงวันที่ ' + fmtDateNum(_lk) + ' ถูกล็อกแล้ว ' + (canEditLegal() ? 'ปลดล็อกได้ที่ การบัญชี → ปิดงบรายเดือน' : 'ต้องให้เจ้าของบริษัทปลดล็อกก่อน'));
-  var extra = {};
+  // ข้อมูลที่ฟอร์มนี้ไม่ได้แก้ (สถานะภาษีซื้อ บัญชีที่จ่าย เงินสดย่อย/เงินทดรอง ฯลฯ) คงไว้ตามเดิม
+  var extra = Object.assign({}, form.doc ? form.doc.extra : form.keep);
+  def.extra.map(function(f) { return f.key; }).concat(['note', 'terms', 'attachments', 'project', 'dept', 'branch', 'account', 'incomeCat', 'expCategory']).forEach(function(k) { delete extra[k]; });
   def.extra.forEach(function(f, i) {
     var el = byId('fx_' + i);
     extra[f.key] = el ? (f.type === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value.trim()) : '';
@@ -1070,7 +1072,7 @@ function catAcc(d, dflt) {
 // สถานะใช้สิทธิ์ภาษีซื้อ (จัดการเอกสารภาษีซื้อ): ไม่ระบุ = ใช้สิทธิ์ในเดือนของเอกสาร
 function vatClaimOf(d) {
   var c = (d.extra && d.extra.vatClaim) || {}, dm = (d.date || '').slice(0, 7);
-  return { st: c.st === 'pending' || c.st === 'none' ? c.st : 'claimed', ym: c.st === 'claimed' && c.ym ? c.ym : dm, invNo: c.invNo || '', invDate: c.invDate || '' };
+  return { st: c.st === 'pending' || c.st === 'none' ? c.st : 'claimed', ym: c.st === 'claimed' && c.ym > dm ? c.ym : dm, invNo: c.invNo || '', invDate: c.invDate || '' };
 }
 // ภาษีซื้อตามสถานะ: รอใช้สิทธิ์ = 1155, ใช้สิทธิ์เดือนหลัง = 1155 แล้วโอนเข้า 1150 วันแรกของเดือนนั้น, ไม่ใช้สิทธิ์ = ค่าใช้จ่าย
 function postInVat(d, vat, add, cr) {

@@ -26,6 +26,8 @@ var PIN_ICONS = {
   billing: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/>',
   'billing:suppliers': '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   'billing:bill': '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  'billing:pettyCash': '<rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9v.01M18 15v.01"/>',
+  'billing:advances': '<circle cx="9" cy="7" r="3"/><path d="M3 19a6 6 0 0112 0"/><path d="M16 11h5M19 9l2 2-2 2"/>',
   'billing:prepaid': '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
   sales: '<path d="M4 19l5-6 4 3 7-9"/><path d="M15 7h5v5"/>',
   'sales:invoice': '<path d="M6 3h12v18H6z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
