@@ -134,7 +134,9 @@ var SUBNAV_ITEMS = [
       { key:'expenseTx', label:'ธุรกรรมค่าใช้จ่าย' },
       { key:'suppliers', label:'ซัพพลายเออร์' },
       { key:'bill', label:'บิล' },
-      { key:'prepaid', label:'ค่าใช้จ่ายชำระล่วงหน้า' }
+      { key:'prepaid', label:'ค่าใช้จ่ายชำระล่วงหน้า' },
+      { key:'pettyCash', label:'เงินสดย่อย' },
+      { key:'advances', label:'เงินทดรองจ่าย' }
     ] },
   { key:'sales',      label:'การขายและรับเงิน', color:'#1B2E3A', icon:'📈', children: [
       { key:'overview', label:'ภาพรวม' },
@@ -309,6 +311,8 @@ function renderPage() {
   else if (pid === 'inventory:overview') shell = invOverviewShell();
   else if (pid === 'tax:overview') shell = taxOvShell();
   else if (pid === 'tax:inputVat') shell = ivShell();
+  else if (pid === 'billing:pettyCash') shell = pcShell();
+  else if (pid === 'billing:advances') shell = advShell();
   else if (pid === 'settings:forms') shell = formsShell();
   else if (pid === 'settings:company') shell = companyPageShell();
   else if (pid === 'settings:import') shell = importShell();
@@ -354,6 +358,8 @@ function refreshPageData() {
   else if (pid === 'accounting:monthClose') html = monthCloseData();
   else if (pid === 'tax:wht') html = whtListData();
   else if (pid === 'tax:inputVat') html = ivData();
+  else if (pid === 'billing:pettyCash') html = pcData();
+  else if (pid === 'billing:advances') html = advData();
   else if (pid === 'inventory:purchaseOrder') html = poData();
   else if (pid === 'accounting:recurring') html = recurData();
   else if (pid === 'accounting:rules') html = rulesData();
