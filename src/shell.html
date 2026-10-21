@@ -512,6 +512,11 @@
   .rep-table tr.gl-acc { cursor: pointer; }
   .rep-table tr.gl-acc:hover td, .rep-table tr.gl-acc:focus-visible td { background: var(--bg-active, var(--bg-hover)); color: var(--text); }
   .rep-table tr.gl-acc td { white-space: nowrap; }
+  .grp-co { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+  .grp-fields { display: grid; grid-template-columns: 110px 1fr 1fr; gap: 0 10px; margin-top: 6px; }
+  .grp-fields .field { margin: 0; min-width: 0; }
+  .grp-fields select, .grp-fields input { width: 100%; }
+  @media (max-width: 640px) { .grp-fields { grid-template-columns: 1fr; } }
   .gl-caret { display: inline-block; width: 1em; }
   .rep-table tr.rep-sub td { color: var(--text-secondary); font-size: 12.5px; padding-top: 4px; padding-bottom: 4px; }
   .count-blank { display: inline-block; width: 90px; border-bottom: 1px solid var(--border-strong); height: 1em; }

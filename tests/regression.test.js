@@ -134,6 +134,46 @@ const REG = (id, title) => { cur = id; console.error('... ' + id + ' ' + title);
   await fq.evaluate(() => openReport('grpIC')); await fq.waitForTimeout(800);
   const ic = await fq.evaluate(() => lastReport.rows.filter(x => !x.g).map(x => strip2(x[3])));
   check('intercompany reconciliation matches both sides', ic.length === 3 && ic.every(t => t === 'ตรงกัน'), ic);
+
+  REG('FEAT-08', 'งบรวม: เลือกบริษัท สัดส่วนถือหุ้น ตัดเงินลงทุน ส่วนได้เสียที่ไม่มีอำนาจควบคุม');
+  await fq.evaluate(async () => {
+    const je = (no, date, a, b, v, extra) => addRec('documents', { type: 'journalEntry', typeLabel: 'สมุดรายวันทั่วไป', group: 'other', docNo: no, party: 'ทุน', date, items: [{ account: a, debit: v, credit: 0 }, { account: b, debit: 0, credit: v }], total: v, net: v, status: 'done', extra: extra || {}, createdAt: Date.now() });
+    const child = coList().find(c => c.name === 'บริษัท ลูก จำกัด')._id;
+    switchCompany(child);
+    await je('CAP-1', '2025-01-05', '1120', '3110', 1000000);
+    await je('SAL-1', '2025-06-30', '1120', '4110', 200000);
+    await je('YC-1', '2025-12-31', '4110', '3120', 50000, { yearClose: true }); // ปิดบัญชีบางส่วนเข้ากำไรสะสม
+    switchCompany('main');
+    await addRec('accounts', { code: '1310', name: 'เงินลงทุนในบริษัทย่อย', accType: 'fixedAsset' });
+    await je('INV-1', '2025-01-05', '1310', '1120', 900000);
+    pageState.repPeriod = 'all'; openReport('grpTB');
+  });
+  await fq.waitForTimeout(800);
+  const tb8 = await fq.evaluate(() => (lastReport.rows.find(x => x.t) || {}).t.map(strip2));
+  check('group trial balance still balances when a company closed its year', /^฿0\.00$/.test(tb8[tb8.length - 1]), tb8);
+  await fq.evaluate(() => openReport('grpBS')); await fq.waitForTimeout(800);
+  await fq.click('text=ตั้งค่างบรวม'); await fq.waitForSelector('[data-gco]');
+  await fq.fill('[data-gco] [data-k="pct"]', '80'); await fq.selectOption('[data-gco] [data-k="inv"]', '1310'); await fq.fill('[data-gco] [data-k="eqAcq"]', '1000000');
+  await fq.click('#modalFoot >> text=บันทึก'); await fq.waitForTimeout(800);
+  const bs8 = await fq.evaluate(() => { const r = lastReport.rows.filter(x => !x.g).map(x => (x.t || x).map(strip2)); const f = re => (r.find(x => re.test(x[0])) || []); return { inv: f(/1310/), cap: f(/3110/), gw: f(/ค่าความนิยม/), post: f(/เพิ่มขึ้นหลังวันลงทุน/), nci: f(/ไม่มีอำนาจควบคุม/), ta: f(/^รวมสินทรัพย์/), tle: f(/รวมหนี้สินและส่วนของเจ้าของ/), note: lastReport.note }; });
+  const last = a => a[a.length - 1];
+  check('investment in the subsidiary is eliminated', last(bs8.inv) === '฿0.00', bs8.inv);
+  check('subsidiary share capital is eliminated, parent capital stays', last(bs8.cap) === '฿0.00' && /80%/.test(bs8.note), [bs8.cap, bs8.note]);
+  check('goodwill = 900,000 − 80% × 1,000,000', last(bs8.gw) === '฿100,000.00', bs8.gw);
+  check('parent share of post-acquisition retained earnings = 80% × 50,000', last(bs8.post) === '฿40,000.00', bs8.post);
+  check('non-controlling interest = 20% × subsidiary equity (1,050,000 + 149,000)', last(bs8.nci) === '฿239,800.00', bs8.nci);
+  check('group balance sheet balances', last(bs8.ta) === last(bs8.tle), [bs8.ta, bs8.tle]);
+  await fq.evaluate(() => openReport('grpPL')); await fq.waitForTimeout(800);
+  const pl8 = await fq.evaluate(() => lastReport.rows.filter(x => !x.g && !x.t && /บริษัทใหญ่|ไม่มีอำนาจควบคุม/.test(x[0])).map(x => x.map(strip2)));
+  check('group profit split: non-controlling interest = 20% × 199,000', pl8.length === 2 && last(pl8[1]) === '฿39,800.00', pl8);
+  await fq.evaluate(() => openGroupSettings()); await fq.waitForSelector('[data-gco]');
+  await fq.uncheck('[data-gco] [data-k="on"]'); await fq.click('#modalFoot >> text=บันทึก'); await fq.waitForTimeout(800);
+  const ex8 = await fq.evaluate(() => ({ cols: lastReport.cols.map(c => c[0]), note: lastReport.note, title: document.querySelector('.rep-co').textContent }));
+  check('a company can be left out of the group statements', !ex8.cols.includes('บริษัท ลูก จำกัด') && /ไม่รวม 1 บริษัท/.test(ex8.note) && /กลุ่มบริษัท \(1 บริษัท\)/.test(ex8.title), ex8);
+  await fq.evaluate(() => openGroupSettings()); await fq.waitForSelector('[data-gco]');
+  await fq.check('[data-gco] [data-k="on"]'); await fq.fill('[data-gco] [data-k="pct"]', '150'); await fq.click('#modalFoot >> text=บันทึก');
+  check('ownership above 100% is rejected', /0–100/.test(await fq.textContent('#formError')));
+  await fq.evaluate(() => closeModal());
   check('no page errors (branch filter, group reports)', fq.errs.length === 0, fq.errs);
 
   REG('FEAT-06', 'ส่งออกผังบัญชีบนเว็บปกติ (GitHub Pages) ได้แค่คัดลอกข้อความ ไม่ได้ไฟล์');
