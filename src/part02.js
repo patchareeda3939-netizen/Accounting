@@ -1067,6 +1067,19 @@ function catAcc(d, dflt) {
   var a = name && STORE.accounts.find(function(x) { return x.name === name; });
   return a ? a.code : dflt;
 }
+// สถานะใช้สิทธิ์ภาษีซื้อ (จัดการเอกสารภาษีซื้อ): ไม่ระบุ = ใช้สิทธิ์ในเดือนของเอกสาร
+function vatClaimOf(d) {
+  var c = (d.extra && d.extra.vatClaim) || {}, dm = (d.date || '').slice(0, 7);
+  return { st: c.st === 'pending' || c.st === 'none' ? c.st : 'claimed', ym: c.st === 'claimed' && c.ym ? c.ym : dm, invNo: c.invNo || '', invDate: c.invDate || '' };
+}
+// ภาษีซื้อตามสถานะ: รอใช้สิทธิ์ = 1155, ใช้สิทธิ์เดือนหลัง = 1155 แล้วโอนเข้า 1150 วันแรกของเดือนนั้น, ไม่ใช้สิทธิ์ = ค่าใช้จ่าย
+function postInVat(d, vat, add, cr) {
+  var c = vatClaimOf(d), side = function(code, v, memo, date, credit) { if (credit) add(code, 0, v, memo, date); else add(code, v, 0, memo, date); };
+  if (c.st === 'none') return side(catAcc(d, SYS.exp), vat, 'ภาษีซื้อไม่ใช้สิทธิ์', null, cr);
+  if (c.st === 'claimed' && c.ym <= (d.date || '').slice(0, 7)) return side(SYS.vatIn, vat, '', null, cr);
+  side(SYS.vatInPend, vat, 'ภาษีซื้อรอใช้สิทธิ์', null, cr);
+  if (c.st === 'claimed') { var m = 'ใช้สิทธิ์ภาษีซื้อ ภ.พ.30 ' + c.ym, dt = c.ym + '-01'; side(SYS.vatIn, vat, m, dt, cr); side(SYS.vatInPend, vat, m, dt, !cr); }
+}
 function postingsOf(d) {
   if (d.voided) return [];
   var L = [], ex = d.extra || {};
@@ -1093,15 +1106,15 @@ function postingsOf(d) {
       add(catAcc(d, SYS.sales), sub, 0); add(SYS.vatOut, vat, 0); add(cashAcc(ex.method), 0, tot); break;
     case 'bill':
       var svcB = taxPointOf(d) === 'payment' && vat;
-      add(catAcc(d, SYS.exp), sub, 0); add(svcB ? SYS.vatInPend : SYS.vatIn, vat, 0); add(SYS.ap, 0, tot);
+      add(catAcc(d, SYS.exp), sub, 0); if (svcB) add(SYS.vatInPend, vat, 0); else postInVat(d, vat, add); add(SYS.ap, 0, tot);
       if (svcB) vatSlices(d).forEach(function(v) { add(SYS.vatIn, v.vat, 0, 'รับรู้ภาษีซื้อเมื่อจ่ายชำระ', v.date); add(SYS.vatInPend, 0, v.vat, 'รับรู้ภาษีซื้อเมื่อจ่ายชำระ', v.date); });
       (d.payments || []).forEach(function(p) { add(SYS.ap, (p.amount || 0) + (p.wht || 0) + (p.fee || 0), 0, 'จ่ายชำระ ' + (p.ref || ''), p.date); add(cashAcc(p.method, p.bankAcc), 0, p.amount, 'จ่ายชำระ', p.date); add(SYS.whtPay, 0, p.wht || 0, 'หัก ณ ที่จ่าย', p.date); add(SYS.fee, 0, p.fee || 0, 'ส่วนลด/ค่าธรรมเนียม', p.date); });
       if (d.status === 'paid' && !(d.payments && d.payments.length)) { add(SYS.ap, tot, 0, 'จ่ายชำระ', d.paidDate || d.date); add(SYS.bank, 0, tot, 'จ่ายชำระ', d.paidDate || d.date); }
       break;
     case 'expense': case 'checkPayment':
-      add(catAcc(d, SYS.exp), sub, 0); add(SYS.vatIn, vat, 0); add(d.type === 'checkPayment' ? SYS.bank : cashAcc(ex.method, ex.bankAcc), 0, tot - wht); add(SYS.whtPay, 0, wht); break;
+      add(catAcc(d, SYS.exp), sub, 0); postInVat(d, vat, add); add(d.type === 'checkPayment' ? SYS.bank : cashAcc(ex.method, ex.bankAcc), 0, tot - wht); add(SYS.whtPay, 0, wht); break;
     case 'vendorCredit':
-      add(SYS.ap, tot, 0); add(catAcc(d, SYS.exp), 0, sub); add(SYS.vatIn, 0, vat); break;
+      add(SYS.ap, tot, 0); add(catAcc(d, SYS.exp), 0, sub); postInVat(d, vat, add, true); break;
     case 'bankDeposit':
       add(SYS.bank, tot, 0); add(SYS.cash, 0, tot); break;
   }
@@ -1130,6 +1143,18 @@ function vatSlices(d) {
   return out;
 }
 // documents as seen by VAT reports: payment-basis docs split into one entry per payment
+// เอกสารสำหรับภาษีมูลค่าเพิ่ม (ภ.พ.30 / รายงานภาษีซื้อ): ภาษีซื้อนับในเดือนที่ใช้สิทธิ์ รอใช้สิทธิ์ไม่นับ ไม่ใช้สิทธิ์ = ซื้อที่ไม่มี VAT
+function vatDocs() {
+  var out = [];
+  taxDocs().forEach(function(d) {
+    if (d._slice || docFlow(d) !== 'exp' || !d.vat) return out.push(d);
+    var c = vatClaimOf(d);
+    if (c.st === 'pending') return;
+    if (c.st === 'none') return out.push(Object.assign({}, d, { vat: 0, subtotal: docAmountExVat(d) + (Number(d.vat) || 0) }));
+    out.push(c.ym === (d.date || '').slice(0, 7) ? d : Object.assign({}, d, { date: c.ym + '-01', _docDate: d.date }));
+  });
+  return out;
+}
 function taxDocs() {
   var out = [];
   STORE.documents.forEach(function(d) {
