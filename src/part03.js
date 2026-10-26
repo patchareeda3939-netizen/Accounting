@@ -170,7 +170,8 @@ var SUBNAV_ITEMS = [
       { key:'forecast', label:'การคาดการณ์' }
     ] },
   { key:'team',       label:'ทีมงาน', color:'#3A6B8A', icon:'🧑‍🤝‍🧑', children: [
-      { key:'employees', label:'พนักงาน' }
+      { key:'employees', label:'พนักงาน' },
+      { key:'payroll', label:'เงินเดือน' }
     ] },
   { key:'project',    label:'โครงการและแผนก', color:'#1B2E3A', icon:'📁', children: [
       { key:'list', label:'โครงการ' },
@@ -312,6 +313,7 @@ function renderPage() {
   else if (pid === 'tax:overview') shell = taxOvShell();
   else if (pid === 'tax:inputVat') shell = ivShell();
   else if (pid === 'billing:pettyCash') shell = pcShell();
+  else if (pid === 'team:payroll') shell = prShell();
   else if (pid === 'billing:advances') shell = advShell();
   else if (pid === 'settings:forms') shell = formsShell();
   else if (pid === 'settings:company') shell = companyPageShell();
@@ -359,6 +361,7 @@ function refreshPageData() {
   else if (pid === 'tax:wht') html = whtListData();
   else if (pid === 'tax:inputVat') html = ivData();
   else if (pid === 'billing:pettyCash') html = pcData();
+  else if (pid === 'team:payroll') html = prData();
   else if (pid === 'billing:advances') html = advData();
   else if (pid === 'inventory:purchaseOrder') html = poData();
   else if (pid === 'accounting:recurring') html = recurData();
