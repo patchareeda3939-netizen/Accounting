@@ -49,7 +49,8 @@ async function verify(email) {
   await signup(o, 'owner@x.com'); await o.waitForSelector('#auCo', { timeout: 10000 });
   ok('no-company screen after signup', true);
   await o.fill('#auCo', 'บริษัท เจ้าของ จำกัด'); await o.fill('#auTax', '0105555000001'); await o.click('#authSubmit');
-  await o.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await o.waitForTimeout(4000);
+  await o.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 });
+  await o.waitForFunction(() => STANDARD_COA.every(r => STORE.accounts.some(a => a.code === r[0])), null, { timeout: 30000 });
   const os = await o.evaluate(() => ({ mode: FB_MODE, role: CUR_ROLE, name: companyName(), accts: STORE.accounts.length, cos: coList().map(c => c.name), pill: byId('companyPill').textContent, av: document.querySelector('.topbar .avatar').textContent }));
   ok('home greeting shows the signed-in user\'s email', await o.textContent('#homeGreeting') === 'สวัสดี owner@x.com !', await o.textContent('#homeGreeting'));
   // account dialog: verification status refreshes without a new login; display name
@@ -84,7 +85,8 @@ async function verify(email) {
   const unver = await e.evaluate(async (co) => { try { const fs = FB.fs, uid = FB.user.uid, bt = fs.batch(); bt.set(fs.doc('companies/' + co + '/members/' + uid), { role: 'editor', email: 'editor@x.com' }); bt.update(fs.doc('companies/' + co), { memberIds: firebase.firestore.FieldValue.arrayUnion(uid) }); await bt.commit(); return 'allowed'; } catch (x) { return x.code; } }, coId);
   ok('unverified invitee cannot accept invite', unver === 'permission-denied', unver);
   await verify('editor@x.com'); await e.click('#auRecheck');
-  await e.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 }); await e.waitForTimeout(2500);
+  await e.waitForSelector('#authScreen', { state: 'hidden', timeout: 10000 });
+  await e.waitForFunction(() => STORE.documents.length === 1 && STANDARD_COA.every(r => STORE.accounts.some(a => a.code === r[0])), null, { timeout: 30000 });
   const es = await e.evaluate(() => ({ role: CUR_ROLE, co: CUR_CO, docs: STORE.documents.length, accts: STORE.accounts.length }));
   ok('editor joined after verifying, sees data', es.role === 'editor' && es.co === coId && es.docs === 1 && es.accts >= 27, es);
   const ew = await e.evaluate(async () => { try { await addRec('contacts', { name: 'Editor contact' }); return 'ok'; } catch (x) { return x.code; } });
@@ -308,6 +310,8 @@ async function verify(email) {
 
   // ---- owner creates second company from menu, switches, data isolated
   await o.keyboard.press('Escape'); await o.evaluate(() => { closeModal(); openNewCompany(); }); await o.fill('#ncName', 'บริษัทที่สอง'); await o.click('#modalFoot >> text=สร้างและสลับไปบริษัทนี้'); await o.waitForTimeout(4000);
+  // Wait for the background chart-of-accounts installation before testing restore toasts.
+  await o.waitForFunction(() => STANDARD_COA.every(r => STORE.accounts.some(a => a.code === r[0])) && /เพิ่มผังบัญชีมาตรฐาน/.test(byId('toast').textContent), null, { timeout: 30000 });
   const o2 = await o.evaluate(() => ({ co: CUR_CO, docs: STORE.documents.length, cos: coList().map(c => c.name), role: CUR_ROLE }));
   ok('second company created and isolated', o2.co !== coId && o2.docs === 0 && o2.cos.length === 2 && o2.role === 'owner', o2);
   ok('editor does not see owner\'s second company', (await e.evaluate(() => coList().length)) === 1);
@@ -319,8 +323,10 @@ async function verify(email) {
   // ---- restore the first company's backup into the second one
   async function restore(file) {
     await o.evaluate(() => { closeModal(); openRestore(); }); await o.setInputFiles('#rsFile', file); await o.waitForSelector('#rsInfo .banner');
-    await o.click('#modalFoot >> text=กู้คืน'); await o.waitForSelector('#modal', { state: 'hidden', timeout: 30000 }).catch(() => {});
-    await o.waitForTimeout(1500); return o.textContent('#toast');
+    await o.click('#modalFoot >> text=กู้คืน');
+    // The dialog is #overlay .modal; #modal does not exist and would finish waiting immediately.
+    await o.waitForFunction(() => !byId('overlay').classList.contains('open') && /^กู้คืน \d+ รายการแล้ว/.test(byId('toast').textContent), null, { timeout: 30000 });
+    return o.textContent('#toast');
   }
   const t1 = await restore(bfile);
   const r1 = await o.evaluate(() => ({ docs: STORE.documents.length, contacts: STORE.contacts.length, name: companyName(), lock: lockDate() }));
