@@ -488,4 +488,15 @@ await expect('User of another company reads a co1 file', 'deny', () => fileOf(Y,
 await remove(A, 'co1', X, 'viewer');
 await expect('removed member reads a file', 'deny', () => fileOf(X, 'co1', 'fileaaaa01'));
 
+S('R17', 'ข้อมูลการลา: แยกบริษัทและสิทธิ์แก้ไขเหมือนข้อมูลพนักงาน');
+const leaveRef = (u, co = 'co1') => doc(u.db, `companies/${co}/leaves/leave-test`);
+const leaveData = { empId: 'employee-test', name: 'Test employee', leaveType: 'annual', startDate: '2026-01-01', endDate: '2026-01-01', days: 1, paid: 'yes', status: 'pending' };
+await expect('owner creates leave data', 'allow', () => setDoc(leaveRef(A), leaveData));
+await expect('editor updates leave data', 'allow', () => updateDoc(leaveRef(E), { status: 'approved' }));
+await expect('viewer reads leave data', 'allow', () => getDoc(leaveRef(V)));
+await expect('viewer cannot create or change leave data', 'deny', () => updateDoc(leaveRef(V), { days: 10 }));
+await expect('another company cannot read leave data', 'deny', () => getDoc(leaveRef(B)));
+await expect('another company cannot write leave data', 'deny', () => setDoc(leaveRef(B), leaveData));
+await expect('anonymous cannot read leave data', 'deny', () => getDoc(leaveRef(anonClient)));
+
 process.exit(report() ? 1 : 0);

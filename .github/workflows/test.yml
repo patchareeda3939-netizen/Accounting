@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 supports Ubuntu 24.04; keep CI stable during ubuntu-latest migrations.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -43,7 +44,7 @@ jobs:
         run: npm run test:smoke
 
       - name: Payroll and PND1
-        run: npm run test:payroll
+        run: npm run test:payroll && npm run test:payroll-reports
 
       - name: Firestore rules + regression + end-to-end (Firebase Emulator)
         run: npm run test:firebase

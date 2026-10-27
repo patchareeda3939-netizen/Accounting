@@ -180,13 +180,13 @@ function statusPill(d) { var s = docStatus(d); return '<span class="status st-' 
 /* ================= Data store ================= */
 var db = null;
 var dbReady = false;
-var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] };
+var STORE = { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[], leaves:[] };
 var localSeq = 0;
 
 var CUR_CO = 'main', COMPANIES = [], _unsubs = [], LOCAL_CO = {};
 try { CUR_CO = localStorage.getItem('psm_company') || 'main'; } catch (e) {}
 function cname(coll) { return CUR_CO === 'main' ? coll : coll + '__' + CUR_CO; }
-var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc'],['branches','code','asc']];
+var SUBS = [['documents','createdAt','desc'],['contacts','name','asc'],['products','name','asc'],['accounts','code','asc'],['taxReturns','period','asc'],['employees','name','asc'],['settings','updatedAt','asc'],['formStyles','name','asc'],['branches','code','asc'],['leaves','startDate','asc']];
 async function initDb() {
   try { db = (window.claude && window.claude.use) ? await window.claude.use('db') : null; } catch (e) { db = null; }
   if (!db && fbConfigured()) db = await fbStart();
@@ -217,7 +217,7 @@ function subscribe(coll, field, dir) {
 }
 function switchCompany(id) {
   if (id === CUR_CO) return;
-  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[] }; }
+  if (!db) { localFlush(); LOCAL_CO[CUR_CO] = STORE; STORE = LOCAL_CO[id] || { documents:[], contacts:[], products:[], accounts:[], taxReturns:[], employees:[], settings:[], formStyles:[], branches:[], leaves:[] }; }
   else SUBS.forEach(function(s) { STORE[s[0]] = []; });
   CUR_CO = id; try { localStorage.setItem('psm_company', id); } catch (e) {}
   if (!db && !LOCAL_CO[id]) localLoad();
@@ -228,7 +228,7 @@ function switchCompany(id) {
 }
 function strip(rec) { var o = Object.assign({}, rec); delete o._id; return o; }
 function sortLocal(coll) {
-  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1], branches:['code',1] }[coll];
+  var f = { documents:['createdAt',-1], contacts:['name',1], products:['name',1], accounts:['code',1], taxReturns:['period',1], employees:['name',1], settings:['updatedAt',1], formStyles:['name',1], branches:['code',1], leaves:['startDate',1] }[coll];
   STORE[coll].sort(function(a, b) { var x = a[f[0]], y = b[f[0]]; return (x > y ? 1 : x < y ? -1 : 0) * f[1]; });
 }
 function writeError(e) {

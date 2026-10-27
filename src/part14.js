@@ -60,17 +60,17 @@ function whtCfg(c) {
 }
 function renderWht(c, opt) {
   opt = opt || {};
-  var co = companySettings(), d = c.d, ex = d.extra || {};
-  var ct = STORE.contacts.find(function(x) { return x.name === d.party; }) || {};
+  var co = opt.company || companySettings(), d = c.d, ex = d.extra || {};
+  var ct = opt.contact || STORE.contacts.find(function(x) { return x.name === d.party; }) || {};
   var person = ct.entity === 'person', cfg = opt.cfg || whtCfg(c), form = cfg.form, inc = cfg.income;
   var fmt = function(n) { return (Number(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
-  var copy = opt.copy || 1, ci = coInfoFor(d), payerName = ci.name + ' (' + ci.branchName + ')';
+  var copy = opt.copy || 1, ci = opt.companyInfo || coInfoFor(d), payerName = ci.name + ' (' + ci.branchName + ')';
   var rows = WT_INCOME.map(function(r) {
     var on = r[0] === inc;
-    return '<tr' + (on ? ' class="wt-on"' : '') + '><td class="wt-desc" style="padding-left:' + (r[0] === '4b' ? 22 : r[2] ? 22 + r[2] * 16 : 6) + 'px">' + esc(r[1]) + (on && /ระบุ/.test(r[1]) ? ' <span class="wt-fill" style="min-width:160px">' + esc(cfg.other || '') + '</span>' : '') + '</td><td class="c">' + (on ? thDate(c.date) : '') + '</td><td class="r">' + (on ? fmt(c.base) : '') + '</td><td class="r">' + (on ? fmt(c.wht) : '') + '</td></tr>';
+    return '<tr' + (on ? ' class="wt-on"' : '') + '><td class="wt-desc" style="padding-left:' + (r[0] === '4b' ? 22 : r[2] ? 22 + r[2] * 16 : 6) + 'px">' + esc(r[1]) + (on && /ระบุ/.test(r[1]) ? ' <span class="wt-fill" style="min-width:160px">' + esc(cfg.other || '') + '</span>' : '') + '</td><td class="c">' + (on ? esc(opt.incomeDateText || thDate(c.date)) : '') + '</td><td class="r">' + (on ? fmt(c.base) : '') + '</td><td class="r">' + (on ? fmt(c.wht) : '') + '</td></tr>';
   }).join('');
   var sp = function(v, w) { return '<span class="wt-fill" style="min-width:' + (w || 200) + 'px">' + esc(v || '') + '</span>'; };
-  var dt = (c.date || todayStr()).split('-'), mon = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'][Number(dt[1]) - 1];
+  var dt = (opt.issueDate || c.date || todayStr()).split('-'), mon = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'][Number(dt[1]) - 1];
   return '<div class="wt-paper">' +
     '<div class="wt-top"><div>' + WT_COPIES.slice(0, 2).map(function(l) { return '<div>' + ck(false) + ' <b>' + l[0] + '</b> <small>' + l[1] + '</small></div>'; }).join('') + '</div></div>' +
     '<div class="wt-frame"><div class="wt-head"><div class="wt-title"><b>หนังสือรับรองการหักภาษี ณ ที่จ่าย</b><div>ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div></div><div class="wt-no">เล่มที่ ' + sp('', 80) + '<br>เลขที่ ' + sp(c.no, 110) + '</div></div>' +
@@ -83,7 +83,7 @@ function renderWht(c, opt) {
     '<div class="wt-sec wt-forms"><div>ลำดับที่ ' + sp(String(c.seq), 70) + ' ในแบบ</div><div class="wt-fgrid">' + [['1a','(1) ภ.ง.ด.1ก'],['1s','(2) ภ.ง.ด.1ก พิเศษ'],['2','(3) ภ.ง.ด.2'],['3','(4) ภ.ง.ด.3'],['2a','(5) ภ.ง.ด.2ก'],['3a','(6) ภ.ง.ด.3ก'],['53','(7) ภ.ง.ด.53']].map(function(f) { return '<span>' + ck(form === f[0]) + ' ' + f[1] + '</span>'; }).join('') + '</div></div>' +
     '<table class="wt-tbl"><thead><tr><th>ประเภทเงินได้พึงประเมินที่จ่าย</th><th>วัน เดือน<br>หรือปีภาษี ที่จ่าย</th><th>จำนวนเงินที่จ่าย</th><th>ภาษีที่หัก<br>และนำส่งไว้</th></tr></thead><tbody>' + rows + '</tbody>' +
     '<tfoot><tr><td colspan="2" class="r"><b>รวมเงินที่จ่ายและภาษีที่หักนำส่ง</b></td><td class="r"><b>' + fmt(c.base) + '</b></td><td class="r"><b>' + fmt(c.wht) + '</b></td></tr><tr><td colspan="4"><b>รวมเงินภาษีที่หักนำส่ง</b> (ตัวอักษร) <span class="wt-words">' + esc(bahtText(c.wht)) + '</span></td></tr></tfoot></table>' +
-    '<div class="wt-sec wt-line">เงินที่จ่ายเข้า กบข./กสจ./กองทุนสงเคราะห์ครูโรงเรียนเอกชน ' + sp('0.00', 40) + ' บาท &nbsp; กองทุนประกันสังคม ' + sp('0.00', 40) + ' บาท &nbsp; กองทุนสำรองเลี้ยงชีพ ' + sp('0.00', 40) + ' บาท</div>' +
+    '<div class="wt-sec wt-line">เงินที่จ่ายเข้า กบข./กสจ./กองทุนสงเคราะห์ครูโรงเรียนเอกชน ' + sp('0.00', 40) + ' บาท &nbsp; กองทุนประกันสังคม ' + sp(fmt(opt.sso || 0), 40) + ' บาท &nbsp; กองทุนสำรองเลี้ยงชีพ ' + sp(fmt(opt.pvd || 0), 40) + ' บาท</div>' +
     '<div class="wt-sec wt-line"><b>ผู้จ่ายเงิน</b> &nbsp; ' + ck(cfg.payer === '1') + ' (1) หัก ณ ที่จ่าย &nbsp; ' + ck(cfg.payer === '2') + ' (2) ออกให้ตลอดไป &nbsp; ' + ck(cfg.payer === '3') + ' (3) ออกให้ครั้งเดียว &nbsp; ' + ck(cfg.payer === '4') + ' (4) อื่น ๆ (ระบุ) ' + sp('', 90) + '</div>' +
     '<div class="wt-foot"><div class="wt-warn"><b>คำเตือน</b> ผู้มีหน้าที่ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย ฝ่าฝืนไม่ปฏิบัติตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร ต้องรับโทษทางอาญาตามมาตรา 35 แห่งประมวลรัษฎากร</div>' +
     '<div class="wt-sign"><div>ขอรับรองว่าข้อความและตัวเลขดังกล่าวข้างต้นถูกต้องตรงกับความจริงทุกประการ</div><div class="wt-sigline">ลงชื่อ ' + sp('', 200) + ' ผู้จ่ายเงิน</div><div class="wt-payer">( ' + esc(payerName) + ' )</div><div class="wt-sigdate">' + sp(String(Number(dt[2])), 40) + ' / ' + sp(mon, 80) + ' / ' + sp(String(Number(dt[0]) + 543), 60) + '</div><div class="wt-hint">(วัน เดือน ปี ที่ออกหนังสือรับรองฯ)</div><div class="wt-stamp">ประทับตรา<br>นิติบุคคล<br>(ถ้ามี)</div></div></div></div>' +
