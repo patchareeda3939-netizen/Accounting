@@ -37,7 +37,8 @@ function localPages() {
   fs.writeFileSync(path.join(TMP, 'local.html'), html);
   fs.copyFileSync(path.join(__dirname, 'mockdb.js'), path.join(TMP, 'mockdb.js'));
   fs.writeFileSync(path.join(TMP, 'claudedb.html'), html.replace('<body>', '<body><script src="mockdb.js"></script>'));
-  return { local: 'file://' + path.join(TMP, 'local.html'), claudedb: 'file://' + path.join(TMP, 'claudedb.html') };
+  const base = process.env.TEST_LOCAL_ORIGIN ? process.env.TEST_LOCAL_ORIGIN.replace(/\/$/, '') + '/tests/.tmp/' : 'file://' + TMP + '/';
+  return { local: base + 'local.html', claudedb: base + 'claudedb.html' };
 }
 
 // new isolated browser context; Firebase SDK served from node_modules, no other internet access

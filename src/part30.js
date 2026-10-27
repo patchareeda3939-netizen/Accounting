@@ -78,9 +78,9 @@ function prData() {
     var act = STORE.employees.filter(function(e) { return (e.active || 'yes') === 'yes'; }).length;
     h += '<div class="yc-card adj-empty"><b>ยังไม่มีรอบเงินเดือน ' + esc(monthLabel(ym, true)) + '</b><div>' + (act ? 'พนักงานที่ทำงานอยู่ ' + act + ' คน' : 'ยังไม่มีพนักงาน — เพิ่มพนักงานที่ ทีมงาน → พนักงาน') + '</div></div>';
   } else {
-    var it = d.items || [], rem = prRemitOf(d), wht = prSum(it, 'wht'), sso = prSum(it, 'sso'), er = prSum(it, 'ssoEr');
+    var payYm = d.date.slice(0, 7), it = d.items || [], rem = prRemitOf(d), wht = prSum(it, 'wht'), sso = prSum(it, 'sso'), er = prSum(it, 'ssoEr');
     h += '<div class="kpi-row">' + kpi('เงินเดือนรวม', fmtMoney(prSum(it, 'gross')), it.length + ' คน · จ่ายวันที่ ' + fmtDateNum(d.date)) + kpi('จ่ายสุทธิ', fmtMoney(prSum(it, 'net')), (d.extra.payFrom || '') + ' ' + (acctName(d.extra.payFrom) || '')) +
-      kpi('ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)', fmtMoney(wht), 'นำส่งภายใน ' + fmtDate(nextMonthDay(ym, 7)) + ' (e-Filing ' + fmtDate(nextMonthDay(ym, 15)) + ')') +
+      kpi('ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)', fmtMoney(wht), 'นำส่งภายใน ' + fmtDate(nextMonthDay(payYm, 7)) + ' (e-Filing ' + fmtDate(nextMonthDay(payYm, 15)) + ')') +
       kpi('ประกันสังคม (สปส.1-10)', fmtMoney(sso + er), 'ลูกจ้าง ' + fmtMoney(sso) + ' + นายจ้าง ' + fmtMoney(er) + ' · ภายใน ' + fmtDate(nextMonthDay(ym, 15))) + '</div>' +
       '<div class="banner ' + (rem ? 'ok' : 'warn') + '">' + (rem ? 'นำส่งภาษีและประกันสังคมแล้ว วันที่ ' + fmtDateNum(rem.date) + ' (' + esc(rem.docNo || '') + ')' : 'ยังไม่ได้บันทึกการนำส่ง ภ.ง.ด.1 และประกันสังคมของเดือนนี้') +
       (ro || rem || (!wht && !sso && !er) ? '' : ' <button type="button" class="btn btn-sm btn-dark" onclick="openPrRemit(findDoc(\'' + d._id + '\'))">บันทึกการนำส่ง</button>') + '</div>' +
@@ -89,6 +89,7 @@ function prData() {
       '</tbody><tfoot><tr><td>รวม</td><td class="r">' + fmtMoney(prSum(it, 'base')) + '</td><td class="r">' + fmtMoney(prSum(it, 'extra')) + '</td><td class="r">' + fmtMoney(prSum(it, 'deduct')) + '</td><td class="r">' + fmtMoney(sso) + '</td><td class="r">' + fmtMoney(wht) + '</td><td class="r">' + fmtMoney(prSum(it, 'net')) + '</td><td></td></tr></tfoot></table></div>' +
       '<div class="toolbar" style="margin:8px 0"><button type="button" class="btn btn-outline btn-sm" onclick="prExport(\'' + d._id + '\')">ส่งออกรายการโอนเงินเดือน (CSV)</button><a href="#" class="po-link small" data-doc="' + esc(d._id) + '" onclick="event.preventDefault()">' + esc(d.docNo || '') + ' · ดูการลงบัญชี</a></div>';
   }
+  h += '<div class="toolbar"><button type="button" class="btn btn-outline" onclick="openPrPnd1()">สรุปข้อมูล ภ.ง.ด.1 ตามเดือนที่จ่าย</button></div>';
   var hist = STORE.documents.filter(function(x) { return x.type === 'payroll' && !x.voided; }).sort(function(a, b) { return String(b.extra.period).localeCompare(String(a.extra.period)); });
   if (hist.length) h += '<div class="page-block"><h2>รอบเงินเดือนทั้งหมด</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>เดือน</th><th>วันที่จ่าย</th><th class="r">คน</th><th class="r">เงินเดือนรวม</th><th class="r">ภาษี</th><th class="r">ประกันสังคม</th><th class="r">จ่ายสุทธิ</th><th>นำส่ง</th></tr></thead><tbody>' +
     hist.map(function(x) { var it2 = x.items || []; return '<tr class="row-link" tabindex="0" onclick="pageState.prYm=\'' + esc(x.extra.period) + '\';refreshPageData()"><td>' + esc(monthLabel(x.extra.period, true)) + '</td><td class="num">' + fmtDateNum(x.date) + '</td><td class="r">' + it2.length + '</td><td class="r">' + fmtMoney(prSum(it2, 'gross')) + '</td><td class="r">' + fmtMoney(prSum(it2, 'wht')) + '</td><td class="r">' + fmtMoney(prSum(it2, 'sso') + prSum(it2, 'ssoEr')) + '</td><td class="r">' + fmtMoney(prSum(it2, 'net')) + '</td><td>' + (prRemitOf(x) ? '<span class="status st-paid">นำส่งแล้ว</span>' : '<span class="status st-unpaid">ยังไม่นำส่ง</span>') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
@@ -120,17 +121,17 @@ function openPrRun(ym) {
   var d = prRun(ym), cfg = prCfg(), emps = STORE.employees.slice().sort(function(a, b) { return String(a.name).localeCompare(String(b.name), 'th'); });
   var lines = emps.map(function(e) {
     var old = d && (d.items || []).find(function(x) { return x.empId === e._id; });
-    if (old) return Object.assign({ on: true }, old, { _manual: true });
+    if (old) return Object.assign({ on: true }, old, { _manual: true, _saved: true });
     var base = Number(e.salary) || round2((Number(e.hourlyRate) || 0) * (typeof empHours === 'function' ? empHours(e.name, ym) : 0));
     return { on: !d && (e.active || 'yes') === 'yes' && base > 0, empId: e._id, name: e.name, taxId: e.taxId || '', bankAcct: e.bankAcct || '', position: e.position || '', base: base, extra: 0, deduct: 0 };
   });
-  prForm = { ym: ym, doc: d, lines: lines.map(function(l) { var e = STORE.employees.find(function(x) { return x._id === l.empId; }); return l.on ? prCalc(l, e, cfg, l._manual ? l.wht : null) : l; }) };
+  prForm = { ym: ym, doc: d, lines: lines.map(function(l) { var e = STORE.employees.find(function(x) { return x._id === l.empId; }); return l.on && !l._saved ? prCalc(l, e, cfg, l._manual ? l.wht : null) : l; }) };
   if (!lines.length) { showToast('ยังไม่มีพนักงาน — เพิ่มที่ ทีมงาน → พนักงาน'); return; }
   var payDate = (d && d.date) || monthEnd(ym);
   openModal({ full: true, title: (d ? 'แก้ไข' : 'สร้าง') + 'รอบเงินเดือน ' + monthLabel(ym, true), body:
     '<div class="grid-2" style="max-width:640px"><div class="field"><label for="prDate">วันที่จ่าย</label><input id="prDate" type="date" value="' + esc(payDate) + '"></div><div class="field"><label for="prFrom">จ่ายจากบัญชี</label><select id="prFrom">' + pcOpts(pcPayAccs(), (d && d.extra.payFrom) || cfg.payFrom) + '</select></div></div>' +
     '<div class="items-wrap"><table class="data-table pr-table"><thead><tr><th></th><th>พนักงาน</th><th class="r">เงินเดือน/ค่าจ้าง</th><th class="r">รายได้อื่น (OT/โบนัส/เบี้ยเลี้ยง)</th><th class="r">หักขาด/ลา</th><th class="r">ประกันสังคม</th><th class="r">ภาษีหัก ณ ที่จ่าย</th><th class="r">สุทธิ</th></tr></thead><tbody id="prRows"></tbody><tfoot id="prFoot"></tfoot></table></div>' +
-    '<p class="small muted">ภาษีคำนวณให้อัตโนมัติ แก้ตัวเลขได้ (แก้แล้วจะไม่คำนวณใหม่ กดปุ่ม ↺ เพื่อคำนวณอีกครั้ง)</p><div class="form-error" id="formError" hidden></div>',
+    '<p class="small muted">ภาษีประมาณจากรายได้เดือนนี้ × 12 ตามอัตราก้าวหน้า กรณีโบนัสครั้งเดียว เริ่ม/ออกงานระหว่างปี หรือปรับยอดปลายปี ให้ตรวจและปรับภาษีตามข้อมูลจริง แก้ยอดแล้วกด ↺ เพื่อกลับไปคำนวณอัตโนมัติ</p><div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'บันทึกและลงบัญชี', cls:'btn-dark', onClick: savePrRun }], onMount: renderPrRows });
 }
 function renderPrRows() {
@@ -148,14 +149,14 @@ function renderPrRows() {
   host.addEventListener('change', function(ev) {
     var t = ev.target;
     if (t.dataset.on != null) { var i = Number(t.dataset.on); prForm.lines[i].on = t.checked; if (t.checked) recalc(i, null); return renderPrRows(); }
-    if (t.dataset.k) { var j = Number(t.dataset.i), l = prForm.lines[j]; l[t.dataset.k] = Number(t.value) || 0; recalc(j, t.dataset.k === 'wht' ? Number(t.value) || 0 : (l._manual ? l.wht : null)); renderPrRows(); }
+    if (t.dataset.k) { var j = Number(t.dataset.i), l = prForm.lines[j]; l[t.dataset.k] = Number(t.value); recalc(j, t.dataset.k === 'wht' ? Number(t.value) || 0 : (l._manual ? l.wht : null)); renderPrRows(); }
   });
   host.addEventListener('click', function(ev) { var b = ev.target.closest('[data-re]'); if (b) { recalc(Number(b.dataset.re), null); renderPrRows(); } });
 }
 async function savePrRun(btn) {
   var dt = byId('prDate').value, on = prForm.lines.filter(function(l) { return l.on; }), d = prForm.doc;
   if (!on.length) return pcErr('เลือกพนักงานอย่างน้อย 1 คน');
-  if (on.some(function(l) { return l.net < 0; })) return pcErr('ยอดสุทธิของ ' + on.find(function(l) { return l.net < 0; }).name + ' ติดลบ');
+  if (on.some(function(l) { return ['base','extra','deduct','gross','sso','ssoEr','wht','net'].some(function(k) { return !Number.isFinite(Number(l[k])) || Number(l[k]) < 0; }) || Number(l.deduct) > Number(l.base) + Number(l.extra); })) return pcErr('จำนวนเงินต้องเป็นตัวเลขตั้งแต่ศูนย์ และยอดหักขาด/ลาต้องไม่เกินรายได้');
   if (pcDateErr(dt) || (d && pcDateErr(d.date))) return pcErr(pcDateErr(dt) || pcDateErr(d.date));
   btn.disabled = true;
   try {
@@ -173,6 +174,7 @@ function openPrRemit(p, doc) {
     '<div class="grid-2"><div class="field"><label for="prrWht">ภาษีหัก ณ ที่จ่าย ภ.ง.ด.1</label><input id="prrWht" type="number" step="0.01" min="0" value="' + wht + '"></div><div class="field"><label for="prrSso">ประกันสังคม สปส.1-10 (ลูกจ้าง + นายจ้าง)</label><input id="prrSso" type="number" step="0.01" min="0" value="' + sso + '"></div></div><div class="form-error" id="formError" hidden></div>',
     buttons:[CANCEL_BTN, { label:'บันทึก', cls:'btn-dark', onClick: async function(btn) {
       var dt = byId('prrDate').value, w = round2(Number(byId('prrWht').value) || 0), s = round2(Number(byId('prrSso').value) || 0);
+      if (![w, s].every(function(v) { return Number.isFinite(v) && v >= 0; })) return pcErr('ยอดนำส่งภาษีและประกันสังคมต้องเป็นตัวเลขตั้งแต่ศูนย์');
       if (!(w + s > 0)) return pcErr('ระบุยอดที่นำส่ง');
       if (dt < p.date) return pcErr('วันที่นำส่งต้องไม่ก่อนวันที่จ่ายเงินเดือน');
       if (pcDateErr(dt) || (doc && pcDateErr(doc.date))) return pcErr(pcDateErr(dt) || pcDateErr(doc.date));
@@ -198,4 +200,31 @@ async function prExport(id) {
   var d = findDoc(id); if (!d) return;
   var rows = [['ชื่อพนักงาน', 'เลขประจำตัวผู้เสียภาษี', 'บัญชีรับเงิน', 'เงินเดือน', 'รายได้อื่น', 'หักขาด/ลา', 'รวมรายได้', 'ประกันสังคม', 'ภาษีหัก ณ ที่จ่าย', 'สุทธิ']].concat((d.items || []).map(function(x) { return [x.name, x.taxId, x.bankAcct, x.base, x.extra, x.deduct, x.gross, x.sso, x.wht, x.net]; }));
   try { await (await getSaver()).save({ filename: 'เงินเดือน-' + d.extra.period + '.csv', data: toCsv(rows) }); } catch (e) { if (!e || e.code !== 'declined') showToast('ส่งออกไม่สำเร็จ ลองอีกครั้ง'); }
+}
+
+/* ข้อมูลประกอบ ภ.ง.ด.1 ใช้เดือนที่จ่ายเงินจริง ไม่ใช้เดือนทำงาน และไม่ใช่ไฟล์นำเข้า e-Filing */
+function prPnd1Rows(ym) {
+  var rows = [];
+  STORE.documents.filter(function(d) { return d.type === 'payroll' && !d.voided && String(d.date || '').slice(0, 7) === ym; })
+    .sort(function(a, b) { return String(a.date).localeCompare(String(b.date)) || String(a.docNo || '').localeCompare(String(b.docNo || '')); })
+    .forEach(function(d) { (d.items || []).forEach(function(x) { rows.push({ date: d.date, docNo: d.docNo || '', name: x.name || '', taxId: x.taxId || '', gross: Number(x.gross) || 0, wht: Number(x.wht) || 0 }); }); });
+  return rows;
+}
+function openPrPnd1(ym) {
+  ym = ym || pageState.prYm || todayStr().slice(0, 7);
+  var rows = prPnd1Rows(ym);
+  openModal({ title: 'สรุปข้อมูลประกอบ ภ.ง.ด.1', full: true, body:
+    '<div class="field"><label for="prPndYm">เดือนที่จ่ายเงิน</label><input id="prPndYm" type="month" value="' + esc(ym) + '" onchange="openPrPnd1(this.value)"></div>' +
+    '<p>เงินเดือน/ค่าจ้าง ตามมาตรา 40(1) · แสดงทุกรายการ รวมผู้ที่ไม่มีภาษีหัก</p>' +
+    '<div class="table-wrap"><table class="data-table" id="prPndTable"><thead><tr><th>วันที่จ่าย</th><th>เอกสาร</th><th>ชื่อผู้มีเงินได้</th><th>เลขผู้เสียภาษี</th><th class="r">เงินได้ที่จ่าย</th><th class="r">ภาษีที่หัก</th></tr></thead><tbody>' +
+    rows.map(function(x) { return '<tr><td>' + fmtDateNum(x.date) + '</td><td>' + esc(x.docNo) + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.taxId || 'ยังไม่ระบุ') + '</td><td class="r">' + fmtMoney(x.gross) + '</td><td class="r">' + fmtMoney(x.wht) + '</td></tr>'; }).join('') +
+    '</tbody><tfoot><tr><td colspan="4">รวม ' + rows.length + ' รายการ</td><td class="r">' + fmtMoney(prSum(rows, 'gross')) + '</td><td class="r">' + fmtMoney(prSum(rows, 'wht')) + '</td></tr></tfoot></table></div>' +
+    (rows.some(function(x) { return !/^\d{13}$/.test(String(x.taxId).replace(/[-\s]/g, '')); }) ? '<div class="banner warn">มีเลขผู้เสียภาษีไม่ครบ 13 หลัก ตรวจสอบข้อมูลพนักงานและรอบเงินเดือนก่อนจัดทำแบบ</div>' : '') +
+    '<p class="small muted">ใช้ตรวจสอบและประกอบการจัดทำแบบ ภ.ง.ด.1 เท่านั้น CSV นี้ไม่ใช่รูปแบบสำหรับนำเข้า e-Filing และไม่ได้ยื่นภาษีให้อัตโนมัติ</p>',
+    buttons: [{ label:'ส่งออก CSV', cls:'btn-dark', onClick: function() { return prExportPnd1(ym); } }, { label:'ปิด', onClick:closeModal }] });
+}
+async function prExportPnd1(ym) {
+  var rows = [['วันที่จ่าย','เลขที่เอกสาร','ชื่อผู้มีเงินได้','เลขประจำตัวผู้เสียภาษี','ประเภทเงินได้','เงินได้ที่จ่าย','ภาษีที่หัก','เงื่อนไขการหัก']].concat(prPnd1Rows(ym).map(function(x) { return [x.date, x.docNo, x.name, x.taxId, '40(1)', x.gross, x.wht, 'หัก ณ ที่จ่าย']; }));
+  try { await (await getSaver()).save({ filename:'สรุป-ภงด1-' + ym + '.csv', data:toCsv(rows) }); }
+  catch (e) { if (!e || e.code !== 'declined') showToast('ส่งออกไม่สำเร็จ ลองอีกครั้ง'); }
 }

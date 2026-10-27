@@ -23,8 +23,8 @@ async function open(browser, file) {
   p.errs = [];
   p.on('pageerror', e => p.errs.push(e.message));
   p.on('dialog', d => d.accept());
-  await p.route(/^https?:/, r => r.abort()); // ไม่พึ่งอินเทอร์เน็ต (ฟอนต์/CDN)
-  await p.goto('file://' + path.join(TMP, file));
+  await p.route(/^https?:\/\/(?!127\.0\.0\.1)/, r => r.abort()); // ไม่พึ่งอินเทอร์เน็ต (ฟอนต์/CDN)
+  await p.goto(process.env.TEST_LOCAL_ORIGIN ? process.env.TEST_LOCAL_ORIGIN.replace(/\/$/, '') + '/tests/.tmp/' + file : 'file://' + path.join(TMP, file));
   await p.waitForTimeout(800);
   return p;
 }
