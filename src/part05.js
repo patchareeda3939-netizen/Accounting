@@ -97,7 +97,7 @@ function openImportHub() {
     } });
 }
 // branches first: restored documents may refer to them
-var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings'];
+var BACKUP_COLLS = ['branches','documents','contacts','products','accounts','employees','taxReturns','settings','leaves'];
 function saveFileLocally(filename, data, type) {
   var a = document.createElement('a'), url = URL.createObjectURL(new Blob([data], { type: type || 'application/json' }));
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
