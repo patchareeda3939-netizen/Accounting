@@ -9295,13 +9295,13 @@ EMPLOYEE_FIELDS.splice(EMPLOYEE_FIELDS.findIndex(function(f) { return f.key === 
 var prCertDraft = null;
 function prCertId(year,key) { return 'payroll50-' + year + '-' + key; }
 function prCertCurrent(year,key) {
-  var r=prYtdRows(year).find(function(x) { return x.key === key; }); if (!r) return null;
+  var all=prYtdRows(year), r=all.find(function(x) { return x.key === key; }); if (!r) return null;
   var e=STORE.employees.find(function(x) { return x._id === key; }) || {}, co=companySettings();
-  return {year:year,key:key,number:'PR50-' + (Number(year)+543) + '-' + key,issueDate:todayStr(),lastPayment:r.entries[r.entries.length-1].date,
+  return {year:year,key:key,sequence:all.indexOf(r)+1,number:'PR50-' + (Number(year)+543) + '-' + key,issueDate:todayStr(),lastPayment:r.entries[r.entries.length-1].date,
     values:{base:r.taxable,wht:r.wht,sso:r.sso,pvd:r.pvd},person:{name:r.name,taxId:r.taxId || e.taxId || '',address:e.address || '',entity:'person'},company:{taxId:co.taxId || ''},companyInfo:coInfoFor({extra:{}})};
 }
 function prCertHtml(draft) {
-  var c={d:{party:draft.person.name,extra:{}},seq:1,no:draft.number,date:draft.year+'-12-31',base:draft.values.base,wht:draft.values.wht};
+  var c={d:{party:draft.person.name,extra:{}},seq:draft.sequence || 1,no:draft.number,date:draft.year+'-12-31',base:draft.values.base,wht:draft.values.wht};
   var html=renderWht(c,{cfg:{form:'1a',income:'1',payer:'1'},contact:Object.assign({entity:'person'},draft.person),company:draft.company,companyInfo:draft.companyInfo,sso:draft.values.sso,pvd:draft.values.pvd,incomeDateText:String(Number(draft.year)+543),issueDate:draft.issueDate});
   return !draft.savedAt || draft._dirty ? html.replace('<div class="wt-paper">','<div class="wt-paper"><p class="pr-cert-draft">ร่าง — ยังไม่บันทึกเอกสาร</p>') : html;
 }
@@ -9310,6 +9310,7 @@ function openPr50(year,key,latest) {
   var row=prYtdRows(year).find(function(x) { return x.key === key; }), saved=STORE.settings.find(function(x) { return x._id === prCertId(year,key); });
   if (row && row.taxIds.length > 1 && (!saved || latest)) { openModal({title:'ตรวจเลขผู้เสียภาษีก่อนจัดทำ 50 ทวิ',body:'<p>ข้อมูลเงินเดือนของพนักงานคนนี้มีเลขผู้เสียภาษีต่างกันในปีเดียวกัน โปรดตรวจและแก้รอบเงินเดือนก่อนจัดทำเอกสาร</p>',buttons:[{label:'กลับ',onClick:function() { openPrReport('cert',year); }}]}); return; }
   var current=prCertCurrent(year,key); if (!current && !saved) return;
+  if (latest && saved && current) { current.sequence=saved.sequence || current.sequence; current.number=saved.number; }
   var sourceCompany=CUR_CO;
   prCertDraft=JSON.parse(JSON.stringify(saved && !latest ? strip(saved) : current));
   var draft=prCertDraft, missing=[];
@@ -9320,13 +9321,13 @@ function openPr50(year,key,latest) {
   var changed=saved && current && JSON.stringify(saved.values)!==JSON.stringify(current.values);
   var controls='<p>' + (saved && !latest ? 'แสดงฉบับที่บันทึกไว้ รุ่น ' + (saved.version || 1) : 'ร่างจากเงินเดือนที่จ่ายในปีที่เลือก') + (changed ? ' · ข้อมูลเงินเดือนปัจจุบันต่างจากฉบับที่บันทึก กดโหลดข้อมูลล่าสุดหากต้องการจัดทำฉบับปรับปรุง' : '') + '</p>' +
     (missing.length ? '<div class="banner warn">ยังขาด ' + missing.map(esc).join(' / ') + ' — เติมข้อมูลก่อนใช้เอกสารจริง</div>' : '') +
-    '<div class="grid-2"><div class="field"><label for="prCertNo">เลขที่เอกสาร</label><input id="prCertNo" value="' + esc(draft.number) + '"></div><div class="field"><label for="prCertDate">วันที่ออกเอกสาร</label><input id="prCertDate" type="date" value="' + esc(draft.issueDate) + '"></div></div><div id="prCertError" class="form-error" hidden></div>';
-  var readDraft=function() { if (draft.number !== byId('prCertNo').value.trim() || draft.issueDate !== byId('prCertDate').value) draft._dirty=true; draft.number=byId('prCertNo').value.trim(); draft.issueDate=byId('prCertDate').value; return draft; };
+    '<div class="field"><label for="prCertSequence">ลำดับในแบบ ภ.ง.ด.1ก (ตรวจให้ตรงกับแบบที่ยื่น)</label><input id="prCertSequence" type="number" min="1" step="1" value="' + esc(String(draft.sequence || 1)) + '"></div><div class="grid-2"><div class="field"><label for="prCertNo">เลขที่เอกสาร</label><input id="prCertNo" value="' + esc(draft.number) + '"></div><div class="field"><label for="prCertDate">วันที่ออกเอกสาร</label><input id="prCertDate" type="date" value="' + esc(draft.issueDate) + '"></div></div><div id="prCertError" class="form-error" hidden></div>';
+  var readDraft=function() { if (draft.sequence !== Number(byId('prCertSequence').value) || draft.number !== byId('prCertNo').value.trim() || draft.issueDate !== byId('prCertDate').value) draft._dirty=true; draft.number=byId('prCertNo').value.trim(); draft.issueDate=byId('prCertDate').value; draft.sequence=Number(byId('prCertSequence').value); return draft; };
   var buttons=[];
   if (!fbReadOnly()) buttons.push({label:'บันทึกเอกสาร',cls:'btn-dark',onClick:async function(btn) {
     if (!prReportCompanyOk(sourceCompany) || fbReadOnly()) return;
     readDraft(); var err=byId('prCertError');
-    if (!draft.number || !prValidIsoDate(draft.issueDate) || draft.issueDate < draft.lastPayment) { err.hidden=false; err.textContent='ระบุเลขที่และวันที่ออกเอกสาร โดยวันที่ออกต้องไม่ก่อนวันที่จ่ายเงินล่าสุดในรายงาน'; return; }
+    if (!Number.isInteger(draft.sequence) || draft.sequence < 1 || !draft.number || !prValidIsoDate(draft.issueDate) || draft.issueDate < draft.lastPayment) { err.hidden=false; err.textContent='ระบุลำดับในแบบเป็นจำนวนเต็มตั้งแต่ 1 เลขที่ และวันที่ออกเอกสาร โดยวันที่ออกต้องไม่ก่อนวันที่จ่ายเงินล่าสุดในรายงาน'; return; }
     if (missing.length) { err.hidden=false; err.textContent='เติมข้อมูลที่ขาดในข้อมูลพนักงาน/บริษัท แล้วโหลดข้อมูลล่าสุดก่อนบันทึกเอกสาร'; return; }
     btn.disabled=true;
     try {
@@ -9337,9 +9338,9 @@ function openPr50(year,key,latest) {
     } catch(e) { btn.disabled=false; err.hidden=false; err.textContent=writeError(e); }
   }});
   if (current) buttons.push({label:'โหลดข้อมูลเงินเดือนล่าสุด',onClick:function() { openPr50(year,key,true); }});
-  buttons.push({label:'ดู/พิมพ์',onClick:function() { if (!prReportCompanyOk(sourceCompany)) return; readDraft(); if (!draft.number || !prValidIsoDate(draft.issueDate) || draft.issueDate < draft.lastPayment) { byId('prCertError').hidden=false; byId('prCertError').textContent='ตรวจเลขที่และวันที่ออกเอกสาร ต้องไม่ก่อนวันที่จ่ายล่าสุด'; return; } openPrintViewer({typeLabel:'50 ทวิ เงินเดือน',docNo:draft.number,type:'payroll50'},prCertHtml(draft),'50ทวิ-' + year + '-' + draft.person.name + '.pdf'); }},{label:'กลับ',onClick:function() { openPrReport('cert',year); }});
+  buttons.push({label:'ดู/พิมพ์',onClick:function() { if (!prReportCompanyOk(sourceCompany)) return; readDraft(); if (!Number.isInteger(draft.sequence) || draft.sequence < 1 || !draft.number || !prValidIsoDate(draft.issueDate) || draft.issueDate < draft.lastPayment) { byId('prCertError').hidden=false; byId('prCertError').textContent='ตรวจลำดับในแบบ เลขที่ และวันที่ออกเอกสาร ต้องไม่ก่อนวันที่จ่ายล่าสุด'; return; } openPrintViewer({typeLabel:'50 ทวิ เงินเดือน',docNo:draft.number,type:'payroll50'},prCertHtml(draft),'50ทวิ-' + year + '-' + draft.person.name + '.pdf'); }},{label:'กลับ',onClick:function() { openPrReport('cert',year); }});
   openModal({title:'เอกสาร 50 ทวิ — ' + draft.person.name,full:true,focus:false,body:controls + '<div id="prCertPreview" class="pf-scroll">' + prCertHtml(draft) + '</div>',buttons:buttons,onMount:function() {
-    ['prCertNo','prCertDate'].forEach(function(id) { byId(id).addEventListener('change',function() { readDraft(); byId('prCertPreview').innerHTML=prCertHtml(draft); }); });
+    ['prCertNo','prCertDate','prCertSequence'].forEach(function(id) { byId(id).addEventListener('change',function() { readDraft(); byId('prCertPreview').innerHTML=prCertHtml(draft); }); });
   }});
 }
 /* การลาเก็บเป็นจำนวนวันจริง แยกจากเงินหักในเงินเดือนและไม่สร้างรายการบัญชี */
@@ -9463,7 +9464,7 @@ async function prSaveWorkmen(year,btn) {
 }
 function prExportWorkmen(year) {
   var d=prWorkmenInput(year,true); if (d.invalid) { showToast('ตรวจค่าจ้าง เพดาน และอัตราก่อนส่งออก'); return; }
-  var rows=[['ข้อมูลประกอบ กท.20 ก — ไม่ใช่ไฟล์ยื่นอัตโนมัติ'],['ปีภาษี',Number(year)+543],['เลขบัญชีนายจ้าง',d.accountNo],['ประเภท/รหัสกิจการ',d.activity],['พนักงาน','รวมรายรับเงินเดือน','ฐานภาษีอ้างอิง','ค่าจ้างประกอบแบบ','เพดานต่อปี','ฐานหลังเพดานประมาณ','อัตรา (%)','เงินสมทบประมาณ']].concat(d.rows.map(function(r) { return [r.name,r.income,r.taxable,r.wage,d.cap == null ? '' : d.cap,r.capped == null ? '' : r.capped,d.rate == null ? '' : d.rate,r.contribution == null ? '' : r.contribution]; }));
+  var rows=[['ข้อมูลประกอบ กท.20 ก — ไม่ใช่ไฟล์ยื่นอัตโนมัติ'],['ปีที่รายงาน',Number(year)+543],['เลขบัญชีนายจ้าง',d.accountNo],['ประเภท/รหัสกิจการ',d.activity],['พนักงาน','รวมรายรับเงินเดือน','ฐานภาษีอ้างอิง','ค่าจ้างประกอบแบบ','เพดานต่อปี','ฐานหลังเพดานประมาณ','อัตรา (%)','เงินสมทบประมาณ']].concat(d.rows.map(function(r) { return [r.name,r.income,r.taxable,r.wage,d.cap == null ? '' : d.cap,r.capped == null ? '' : r.capped,d.rate == null ? '' : d.rate,r.contribution == null ? '' : r.contribution]; }));
   rows.push(['รวมฐานหลังเพดาน',d.cap == null ? '' : prSum(d.rows,'capped')],['เงินสมทบประมาณจากฐานรวมก่อนปัดเศษ',prWorkmenContribution(d) == null ? '' : prWorkmenContribution(d)]);
   return prSaveCsv('ข้อมูลประกอบ-กท20ก-'+year+'.csv',rows);
 }
