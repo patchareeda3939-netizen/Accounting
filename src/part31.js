@@ -149,6 +149,7 @@ function openPr50(year,key,latest) {
 }
 /* การลาเก็บเป็นจำนวนวันจริง แยกจากเงินหักในเงินเดือนและไม่สร้างรายการบัญชี */
 var PR_LEAVE_TYPES=[['annual','ลาพักร้อน'],['sick','ลาป่วย'],['personal','ลากิจ'],['maternity','ลาคลอด'],['other','ลาอื่น ๆ']];
+var PR_ATTENDANCE_TYPES=PR_LEAVE_TYPES.concat([['late','มาสาย'],['absence','ขาดงาน']]);
 var PR_LEAVE_STATUS=[['approved','อนุมัติ'],['pending','รออนุมัติ'],['rejected','ไม่อนุมัติ'],['cancelled','ยกเลิก']];
 function prLeaveRows(year) { return (STORE.leaves || []).filter(function(l) { return String(l.startDate || '').slice(0,4) === year; }).sort(function(a,b) { return String(b.startDate).localeCompare(String(a.startDate)) || String(a._id).localeCompare(String(b._id)); }); }
 function prLeaveEntitlementId(year,empId) { return 'leaveEntitlement-' + year + '-' + empId; }
@@ -167,9 +168,9 @@ function prLeaveBalances(year) {
   });
 }
 function prLeaveContent(kind,year) {
-  var actions=fbReadOnly() ? '' : '<div class="toolbar"><button type="button" class="btn btn-dark" onclick="openPrLeaveForm(null,\'' + year + '\')">+ บันทึกรายละเอียดการลา</button></div>';
-  if (kind === 'leaveDetail') return actions + '<p>ปี ' + (Number(year)+543) + ' · จำนวนวันตามวันทำงานจริงที่ผู้บันทึกระบุ ไม่คำนวณจากยอดหักเงินเดือน</p>' + prReportTable(['พนักงาน','ประเภท','เริ่มลา','สิ้นสุด','จำนวนวัน','รับค่าจ้าง','สถานะ','หมายเหตุ',''],prLeaveRows(year).map(function(l) {
-    return [esc(l.name),esc((PR_LEAVE_TYPES.find(function(t) { return t[0] === l.leaveType; }) || ['','ไม่ระบุ'])[1]),fmtDateNum(l.startDate),fmtDateNum(l.endDate),fmtNum(l.days),l.paid === 'yes' ? 'ได้รับ' : 'ไม่ได้รับ',esc((PR_LEAVE_STATUS.find(function(t) { return t[0] === l.status; }) || ['','ไม่ระบุ'])[1]),esc(l.note || ''),fbReadOnly() ? '' : '<button type="button" class="linkish" onclick="' + prHandler('openPrLeaveForm',[l._id,year]) + '">แก้ไข</button>'];
+  var actions=fbReadOnly() ? '' : '<div class="toolbar"><button type="button" class="btn btn-dark" onclick="openPrLeaveForm(null,\'' + year + '\')">+ บันทึกลา / มาสาย / ขาดงาน</button></div>';
+  if (kind === 'leaveDetail') return actions + '<p>ปี ' + (Number(year)+543) + ' · จำนวนวันตามวันทำงานจริงที่ผู้บันทึกระบุ ไม่คำนวณจากยอดหักเงินเดือน</p>' + prReportTable(['พนักงาน','ประเภท','วันที่เริ่ม','สิ้นสุด','จำนวนวัน','มาสาย (นาที)','รับค่าจ้าง','สถานะ','หมายเหตุ',''],prLeaveRows(year).map(function(l) {
+    return [esc(l.name),esc((PR_ATTENDANCE_TYPES.find(function(t) { return t[0] === l.leaveType; }) || ['','ไม่ระบุ'])[1]),fmtDateNum(l.startDate),fmtDateNum(l.endDate),l.leaveType === 'late' ? '—' : fmtNum(l.days),l.leaveType === 'late' ? fmtNum(l.minutes) : '—',l.paid === 'yes' ? 'ได้รับ' : 'ไม่ได้รับ',esc((PR_LEAVE_STATUS.find(function(t) { return t[0] === l.status; }) || ['','ไม่ระบุ'])[1]),esc(l.note || ''),fbReadOnly() ? '' : '<button type="button" class="linkish" onclick="' + prHandler('openPrLeaveForm',[l._id,year]) + '">แก้ไข</button>'];
   }));
   var rows=[]; prLeaveBalances(year).forEach(function(p) { PR_LEAVE_TYPES.forEach(function(t) { var b=p.types[t[0]];
     rows.push([esc(p.name),esc(t[1]),b.entitlement == null ? 'ยังไม่กำหนดสิทธิ' : fmtNum(b.entitlement),fmtNum(b.used),fmtNum(b.pending),b.balance == null ? '—' : fmtNum(b.balance),fbReadOnly() ? '' : '<button type="button" class="linkish" onclick="' + prHandler('openPrLeaveEntitlement',[year,p.key]) + '">กำหนดสิทธิ</button>']);
@@ -179,13 +180,20 @@ function prLeaveContent(kind,year) {
 function prValidIsoDate(s) { if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; var d=new Date(s+'T00:00:00Z'); return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === s; }
 function prLeaveError(rec) {
   if (!STORE.employees.some(function(e) { return e._id === rec.empId; }) && !(STORE.leaves || []).some(function(l) { return l.empId === rec.empId; })) return 'เลือกพนักงาน';
-  if (!PR_LEAVE_TYPES.some(function(t) { return t[0] === rec.leaveType; }) || !PR_LEAVE_STATUS.some(function(t) { return t[0] === rec.status; })) return 'ประเภทหรือสถานะการลาไม่ถูกต้อง';
+  if (!PR_ATTENDANCE_TYPES.some(function(t) { return t[0] === rec.leaveType; }) || !PR_LEAVE_STATUS.some(function(t) { return t[0] === rec.status; })) return 'ประเภทหรือสถานะการลาไม่ถูกต้อง';
   if (!prValidIsoDate(rec.startDate) || !prValidIsoDate(rec.endDate) || rec.endDate < rec.startDate) return 'ตรวจวันที่เริ่มและสิ้นสุดการลา';
   if (rec.startDate.slice(0,4) !== rec.endDate.slice(0,4)) return 'การลาคร่อมปีให้แยกบันทึกปีละรายการ เพื่อแยกสิทธิและวันลาให้ถูกต้อง';
   var span=(Date.parse(rec.endDate+'T00:00:00Z')-Date.parse(rec.startDate+'T00:00:00Z'))/86400000+1;
-  if (!Number.isFinite(rec.days) || rec.days <= 0 || rec.days > span || Math.abs(rec.days*2-Math.round(rec.days*2)) > 0.000001) return 'จำนวนวันต้องมากกว่าศูนย์ เป็นครึ่งวัน/เต็มวัน และไม่เกินช่วงวันที่ลา';
+  if (rec.leaveType === 'late') {
+    if (rec.startDate !== rec.endDate || !Number.isInteger(rec.minutes) || rec.minutes <= 0 || rec.minutes > 1440 || rec.days !== 0) return 'มาสายให้บันทึกวันเดียว ระบุนาทีเป็นจำนวนเต็ม 1–1440 นาที';
+  } else if (!Number.isFinite(rec.days) || rec.days <= 0 || rec.days > span || Math.abs(rec.days*2-Math.round(rec.days*2)) > 0.000001) return 'จำนวนวันต้องมากกว่าศูนย์ เป็นครึ่งวัน/เต็มวัน และไม่เกินช่วงวันที่ลา';
   if (!['yes','no'].includes(rec.paid)) return 'ระบุการรับค่าจ้าง';
   return '';
+}
+function prAttendanceFields() {
+  var late=byId('prLeaveType').value === 'late';
+  byId('prLeaveDays').closest('.field').hidden=late;
+  byId('prLateMinutesField').hidden=!late;
 }
 function openPrLeaveForm(id,year) {
   if (fbReadOnly()) return;
@@ -194,18 +202,19 @@ function openPrLeaveForm(id,year) {
   if (id && !old) { showToast('ไม่พบรายการลาในบริษัทนี้'); return; }
   var people=STORE.employees.slice(); if (old && !people.some(function(e) { return e._id === old.empId; })) people.push({_id:old.empId,name:old.name});
   if (!people.length) { showToast('เพิ่มพนักงานก่อนบันทึกการลา'); return; }
-  openModal({title:old ? 'แก้ไขรายละเอียดการลา' : 'บันทึกรายละเอียดการลา',body:
+  openModal({title:old ? 'แก้ไขลา / มาสาย / ขาดงาน' : 'บันทึกลา / มาสาย / ขาดงาน',body:
     '<div class="field"><label for="prLeaveEmp">พนักงาน</label><select id="prLeaveEmp">' + pcOpts(people.map(function(e) { return [e._id,e.name]; }),old && old.empId) + '</select></div>' +
-    '<div class="grid-2"><div class="field"><label for="prLeaveType">ประเภท</label><select id="prLeaveType">' + pcOpts(PR_LEAVE_TYPES,old && old.leaveType || 'annual') + '</select></div><div class="field"><label for="prLeaveStatus">สถานะ</label><select id="prLeaveStatus">' + pcOpts(PR_LEAVE_STATUS,old && old.status || 'pending') + '</select></div></div>' +
-    '<div class="grid-2"><div class="field"><label for="prLeaveStart">เริ่มลา</label><input id="prLeaveStart" type="date" value="' + esc(start) + '"></div><div class="field"><label for="prLeaveEnd">สิ้นสุด</label><input id="prLeaveEnd" type="date" value="' + esc(old ? old.endDate : start) + '"></div></div>' +
+    '<div class="grid-2"><div class="field"><label for="prLeaveType">ประเภท</label><select id="prLeaveType" onchange="prAttendanceFields()">' + pcOpts(PR_ATTENDANCE_TYPES,old && old.leaveType || 'annual') + '</select></div><div class="field"><label for="prLeaveStatus">สถานะ</label><select id="prLeaveStatus">' + pcOpts(PR_LEAVE_STATUS,old && old.status || 'pending') + '</select></div></div>' +
+    '<div class="grid-2"><div class="field"><label for="prLeaveStart">วันที่เริ่ม</label><input id="prLeaveStart" type="date" value="' + esc(start) + '"></div><div class="field"><label for="prLeaveEnd">สิ้นสุด</label><input id="prLeaveEnd" type="date" value="' + esc(old ? old.endDate : start) + '"></div></div>' +
     '<div class="grid-2"><div class="field"><label for="prLeaveDays">จำนวนวันทำงานที่ลา (รองรับครึ่งวัน)</label><input id="prLeaveDays" type="number" min="0.5" step="0.5" value="' + esc(String(old ? old.days : 1)) + '"></div><div class="field"><label for="prLeavePaid">รับค่าจ้าง</label><select id="prLeavePaid">' + pcOpts([['yes','ได้รับค่าจ้าง'],['no','ไม่ได้รับค่าจ้าง']],old && old.paid || 'yes') + '</select></div></div>' +
+    '<div class="field" id="prLateMinutesField" hidden><label for="prLateMinutes">มาสาย (นาที)</label><input id="prLateMinutes" type="number" min="1" max="1440" step="1" value="' + esc(String(old && old.minutes || 1)) + '"></div>' +
     '<div class="field"><label for="prLeaveNote">หมายเหตุ</label><input id="prLeaveNote" value="' + esc(old && old.note || '') + '"></div><p class="small muted">ระบุจำนวนวันตามตารางทำงานจริง ไม่รวมวันหยุดที่ไม่ได้ลา การบันทึกนี้ไม่หักเงินเดือนอัตโนมัติ และถ้าคร่อมปีให้แยกรายการ</p><div id="prLeaveError" class="form-error" hidden></div>',buttons:[CANCEL_BTN,{label:'บันทึก',cls:'btn-dark',onClick:async function(btn) {
       if (fbReadOnly() || !prReportCompanyOk(sourceCompany)) return;
       var emp=people.find(function(e) { return e._id === byId('prLeaveEmp').value; });
-      var rec={empId:byId('prLeaveEmp').value,name:emp && emp.name || '',leaveType:byId('prLeaveType').value,status:byId('prLeaveStatus').value,startDate:byId('prLeaveStart').value,endDate:byId('prLeaveEnd').value,days:Number(byId('prLeaveDays').value),paid:byId('prLeavePaid').value,note:byId('prLeaveNote').value.trim(),createdAt:old ? old.createdAt : Date.now(),updatedAt:Date.now()};
+      var rec={empId:byId('prLeaveEmp').value,name:emp && emp.name || '',leaveType:byId('prLeaveType').value,status:byId('prLeaveStatus').value,startDate:byId('prLeaveStart').value,endDate:byId('prLeaveEnd').value,days:byId('prLeaveType').value === 'late' ? 0 : Number(byId('prLeaveDays').value),minutes:byId('prLeaveType').value === 'late' ? Number(byId('prLateMinutes').value) : 0,paid:byId('prLeavePaid').value,note:byId('prLeaveNote').value.trim(),createdAt:old ? old.createdAt : Date.now(),updatedAt:Date.now()};
       var error=prLeaveError(rec), host=byId('prLeaveError'); if (error) { host.hidden=false; host.textContent=error; return; }
-      btn.disabled=true; try { if (old) await setRec('leaves',old._id,rec); else await addRec('leaves',rec); showToast('บันทึกการลาแล้ว'); openPrReport('leaveDetail',rec.startDate.slice(0,4)); } catch(e) { btn.disabled=false; host.hidden=false; host.textContent=writeError(e); }
-    }}]});
+      btn.disabled=true; try { if (old) await setRec('leaves',old._id,rec); else await addRec('leaves',rec); showToast('บันทึกรายการแล้ว'); openPrReport('leaveDetail',rec.startDate.slice(0,4)); } catch(e) { btn.disabled=false; host.hidden=false; host.textContent=writeError(e); }
+    }}],onMount:prAttendanceFields});
 }
 function openPrLeaveEntitlement(year,key) {
   if (fbReadOnly()) return;
@@ -220,7 +229,7 @@ function openPrLeaveEntitlement(year,key) {
 }
 function prExportLeave(kind,year) {
   var rows;
-  if (kind === 'leaveDetail') rows=[['พนักงาน','ประเภทลา','เริ่มลา','สิ้นสุด','จำนวนวัน','รับค่าจ้าง','สถานะ','หมายเหตุ']].concat(prLeaveRows(year).map(function(l) { return [l.name,(PR_LEAVE_TYPES.find(function(t) { return t[0]===l.leaveType; }) || ['',''])[1],l.startDate,l.endDate,l.days,l.paid,(PR_LEAVE_STATUS.find(function(t) { return t[0]===l.status; }) || ['',''])[1],l.note]; }));
+  if (kind === 'leaveDetail') rows=[['พนักงาน','ประเภท','วันที่เริ่ม','สิ้นสุด','จำนวนวัน','มาสาย (นาที)','รับค่าจ้าง','สถานะ','หมายเหตุ']].concat(prLeaveRows(year).map(function(l) { return [l.name,(PR_ATTENDANCE_TYPES.find(function(t) { return t[0]===l.leaveType; }) || ['',''])[1],l.startDate,l.endDate,l.leaveType === 'late' ? '' : l.days,l.leaveType === 'late' ? l.minutes : '',l.paid,(PR_LEAVE_STATUS.find(function(t) { return t[0]===l.status; }) || ['',''])[1],l.note]; }));
   else { rows=[['พนักงาน','ประเภทลา','สิทธิ (วัน)','ใช้แล้ว','รออนุมัติ','คงเหลือ']]; prLeaveBalances(year).forEach(function(p) { PR_LEAVE_TYPES.forEach(function(t) { var b=p.types[t[0]]; rows.push([p.name,t[1],b.entitlement == null ? 'ยังไม่กำหนดสิทธิ' : b.entitlement,b.used,b.pending,b.balance == null ? '' : b.balance]); }); }); }
   return prSaveCsv('รายงาน-'+kind+'-'+year+'.csv',rows);
 }
