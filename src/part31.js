@@ -75,7 +75,7 @@ function openPrReport(kind, year, ym) {
 function prPrintReport(kind,year,ym) {
   if (prReportState && !prReportCompanyOk(prReportState.company)) return;
   var title=PR_REPORTS.find(function(r) { return r[0] === kind; })[1];
-  var node=byId('prReportContent').cloneNode(true); node.querySelectorAll('button').forEach(function(b) { b.remove(); });
+  var node=byId('prReportContent').cloneNode(true); node.querySelectorAll('details').forEach(function(el) { el.open=true; }); node.querySelectorAll('button').forEach(function(b) { b.remove(); });
   node.querySelectorAll('input,select').forEach(function(el) { var span=document.createElement('span'); span.textContent=el.value; el.replaceWith(span); });
   openPrintViewer({typeLabel:title,docNo:kind === 'monthly' ? ym : String(Number(year)+543),type:'payrollReport'},'<div class="pf-paper pr-report-paper"><h2>' + esc(companyName()) + '</h2><h3>' + esc(title) + '</h3>' + node.innerHTML + '</div>',title + '-' + year + '.pdf');
 }
@@ -245,20 +245,26 @@ function prWorkmenContribution(data) {
 }
 function prWorkmenContent(year) {
   var saved=prWorkmenSettings(year), data=prWorkmenInput(year,false), ro=fbReadOnly();
-  var months=Array.from({length:12},function(_,i) { var ym=year+'-'+String(i+1).padStart(2,'0'), entries=prReportEntries(year,ym), runs=STORE.documents.filter(function(d) { return d.type === 'payroll' && !d.voided && String(d.date || '').slice(0,7) === ym; });
-    return [esc(monthLabel(ym,true)),runs.length ? String(new Set(entries.map(function(r) { return r.key; })).size) : 'ไม่มีข้อมูลเงินเดือน',runs.length ? fmtMoney(prSum(entries,'income')) : '—'];
+  var months=Array.from({length:12},function(_,i) { var ym=year+'-'+String(i+1).padStart(2,'0'), entries=prReportEntries(year,ym), hasData=entries.length>0;
+    var salary=round2(entries.reduce(function(n,r) { return n+prAmount(r.line,'base'); },0)), income=prSum(entries,'income');
+    return [esc(monthLabel(ym,true)),hasData ? String(new Set(entries.map(function(r) { return r.key; })).size) : 'ไม่มีข้อมูลเงินเดือน',hasData ? fmtMoney(salary) : '—','—',hasData ? fmtMoney(round2(income-salary)) : '—',hasData ? fmtMoney(income) : '—'];
   });
-  return '<div id="prWorkmenForm"><div class="banner info">ข้อมูลประกอบการจัดทำแบบ กท.20 ก อ้างอิงวันที่จ่ายเงินเดือน ไม่ใช่แบบนำส่งหรือไฟล์ยื่นอัตโนมัติ จำนวนคนคือผู้มีรายการเงินเดือน ต้องตรวจเทียบลูกจ้างจริง รวมผู้ที่ไม่มีรายการเงินเดือนด้วย</div>' +
+  var monthly='<section class="pr-workmen-months" aria-label="สรุปค่าจ้างรายเดือน">'+prReportTable(['เดือน','จำนวนผู้มีรายการเงินเดือน','เงินเดือน/ค่าจ้างพื้นฐาน','ค่าจ้างรายวัน','ค่าตอบแทนอื่นๆ','รวมรายรับ'],data.rows.length ? months : []).replace('<tr><td colspan="6" class="empty-hint">ยังไม่มีข้อมูลในช่วงที่เลือก</td></tr>','')+'</section>';
+  var empty= data.rows.length ? '' : '<div class="pr-workmen-empty"><svg width="72" height="84" viewBox="0 0 72 84" fill="none" aria-hidden="true"><rect x="13" y="5" width="47" height="70" rx="4" stroke="currentColor" stroke-width="2"/><path d="M45 5v16h15M21 31h31M21 41h31M21 51h31M21 61h20" stroke="currentColor" stroke-width="2"/></svg><p>ยังไม่มีข้อมูลเงินเดือนในปีที่เลือก</p><span>เลือกปีที่มีรายการเงินเดือนเพื่อแสดงรายงาน</span></div>';
+  return '<div id="prWorkmenForm" class="pr-workmen"><header class="pr-workmen-header"><div><h2>เอกสาร กท. 20 ก</h2><div class="pr-workmen-company">'+esc(companyName())+'</div><p class="pr-workmen-period">ณ วันที่ '+esc(fmtDateNum(todayStr()))+'<br>ช่วงวันที่ 1 มกราคม – 31 ธันวาคม '+(Number(year)+543)+'</p></div><div class="pr-workmen-summary"><span>ฐานค่าจ้างหลังเพดาน (ประมาณ)</span><strong id="prWorkmenNet">—</strong><small>บาท · ตามข้อมูลประกอบรายปี</small></div></header>'+monthly+empty+
+    '<p class="small muted">ค่าจ้างรายวันแสดง — เนื่องจากข้อมูลเงินเดือนยังไม่แยกรายวัน ค่าตอบแทนอื่นๆ คือรายรับนอกค่าจ้างพื้นฐาน รวมเงินเบิกคืนตามจริง ยอดรายรับนี้ยังไม่ใช่ฐานค่าจ้างที่ต้องแจ้ง</p>'+
+    '<details class="pr-workmen-details"><summary>ตรวจสอบและปรับข้อมูลประกอบแบบ <span>เลขบัญชีนายจ้าง · เพดานค่าจ้าง · อัตราเงินสมทบ</span></summary><div class="pr-workmen-detail-body"><div class="banner info">ข้อมูลประกอบการจัดทำแบบ กท.20 ก อ้างอิงวันที่จ่ายเงินเดือน ไม่ใช่แบบนำส่งหรือไฟล์ยื่นอัตโนมัติ จำนวนคนคือผู้มีรายการเงินเดือน ต้องตรวจเทียบลูกจ้างจริง รวมผู้ที่ไม่มีรายการเงินเดือนด้วย</div>' +
     '<div class="grid-2"><div class="field"><label for="prWorkmenAccount">เลขบัญชีนายจ้างกองทุนเงินทดแทน</label><input id="prWorkmenAccount" value="' + esc(saved.accountNo || '') + '"' + (ro ? ' disabled' : '') + '></div><div class="field"><label for="prWorkmenActivity">ประเภทกิจการ/รหัสกิจการ</label><input id="prWorkmenActivity" value="' + esc(saved.activity || '') + '"' + (ro ? ' disabled' : '') + '></div></div>' +
     '<div class="grid-2"><div class="field"><label for="prWorkmenCap">เพดานค่าจ้างต่อคนต่อปีที่ใช้ยื่น (บาท)</label><input id="prWorkmenCap" type="number" min="0.01" step="0.01" value="' + (data.cap == null ? '' : data.cap) + '" placeholder="ระบุตามประกาศปีที่ยื่น" oninput="prUpdateWorkmen(\'' + year + '\')"' + (ro ? ' disabled' : '') + '></div><div class="field"><label for="prWorkmenRate">อัตราเงินสมทบของกิจการ (%)</label><input id="prWorkmenRate" type="number" min="0" max="100" step="0.001" value="' + (data.rate == null ? '' : data.rate) + '" placeholder="ระบุตามหนังสือแจ้งอัตรา" oninput="prUpdateWorkmen(\'' + year + '\')"' + (ro ? ' disabled' : '') + '></div></div>' +
     '<p class="small muted">ยอดในฐานภาษีเป็นเพียงค่าเริ่มต้นสำหรับตรวจสอบ ไม่ได้ยืนยันว่าเป็นค่าจ้างกองทุนเงินทดแทน ปรับค่าจ้างรายคนให้ตรงหลักเกณฑ์และช่วงการจ้างจริงก่อนใช้ รวมถึงกรณีต้องเฉลี่ยเพดานตามระยะเวลาจ้าง ระบบไม่เฉลี่ยให้เอง</p>' +
     prReportTable(['พนักงาน','รวมรายรับจากเงินเดือน','เงินได้ในฐานภาษี (อ้างอิง)','ค่าจ้างประกอบแบบ (ปรับได้)','ฐานหลังเพดาน (ประมาณ)','เงินสมทบประมาณ'],data.rows.map(function(r,i) {
       return [esc(r.name),fmtMoney(r.income),fmtMoney(r.taxable),'<input id="prWorkmenWage_' + i + '" class="pr-in" type="number" min="0" step="0.01" aria-label="ค่าจ้างประกอบแบบ ' + esc(r.name) + '" value="' + r.wage + '" oninput="prUpdateWorkmen(\'' + year + '\')"' + (ro ? ' disabled' : '') + '>','<span id="prWorkmenCapped_' + i + '">' + (r.capped == null ? 'ยังไม่ระบุเพดาน' : fmtMoney(r.capped)) + '</span>','<span id="prWorkmenContribution_' + i + '">' + (r.contribution == null ? 'ยังไม่ระบุข้อมูลครบ' : fmtMoney(r.contribution)) + '</span>'];
-    })) + '<p id="prWorkmenTotals"></p>' + (ro ? '' : '<button type="button" class="btn btn-dark" onclick="prSaveWorkmen(\'' + year + '\',this)">บันทึกข้อมูลประกอบปีนี้</button>') + '<h3>ข้อมูลเงินเดือนรายเดือน ปี ' + (Number(year)+543) + '</h3>' + prReportTable(['เดือนที่จ่าย','ผู้มีรายการเงินเดือน (คน)','รวมรายรับ'],months) + '</div>';
+    })) + '<p id="prWorkmenTotals"></p>' + (ro ? '' : '<button type="button" class="btn btn-dark" onclick="prSaveWorkmen(\'' + year + '\',this)">บันทึกข้อมูลประกอบปีนี้</button>') + '</div></details></div>';
 }
 function prUpdateWorkmen(year) {
   var d=prWorkmenInput(year,true), host=byId('prWorkmenTotals');
   d.rows.forEach(function(r,i) { byId('prWorkmenCapped_'+i).textContent=d.invalid ? 'ตรวจจำนวนเงิน' : (r.capped == null ? 'ยังไม่ระบุเพดาน' : fmtMoney(r.capped)); byId('prWorkmenContribution_'+i).textContent=d.invalid ? 'ตรวจจำนวนเงิน' : (r.contribution == null ? 'ยังไม่ระบุข้อมูลครบ' : fmtMoney(r.contribution)); });
+  byId('prWorkmenNet').textContent=d.invalid || d.cap == null ? '—' : fmtMoney(prSum(d.rows,'capped'));
   host.textContent=d.invalid ? 'ตรวจเพดาน อัตรา และค่าจ้าง: ต้องเป็นตัวเลขที่ถูกต้อง ไม่ติดลบ และค่าจ้างมีทศนิยมไม่เกิน 2 ตำแหน่ง' : 'ค่าจ้างประกอบแบบรวม ' + fmtMoney(prSum(d.rows,'wage')) + ' · ฐานหลังเพดาน ' + (d.cap == null ? 'ยังไม่ระบุเพดาน' : fmtMoney(prSum(d.rows,'capped'))) + ' · เงินสมทบประมาณจากฐานรวมก่อนปัดเศษ ' + (prWorkmenContribution(d) == null ? 'ยังไม่ระบุข้อมูลครบ' : fmtMoney(prWorkmenContribution(d)));
 }
 async function prSaveWorkmen(year,btn) {

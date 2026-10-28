@@ -72,6 +72,7 @@ const L=require('./lib');
     check('leave records are backed up and never become accounting documents or payroll deductions',await p.evaluate(()=>[BACKUP_COLLS.includes('leaves'),STORE.documents.filter(d=>d.type==='payroll').length,prYtdRows('2026').find(x=>x.name==='พนักงานเอ').income]),[true,4,89500]);
     await p.evaluate(()=>{closeModal();openPrReport('workmen','2026');});
     check('workmen report does not invent a ceiling/rate or treat missing payroll months as zero staff',await p.evaluate(()=>[prWorkmenInput('2026',true).cap,prWorkmenInput('2026',true).rate,byId('prReportContent').textContent.includes('ไม่มีข้อมูลเงินเดือน'),byId('prWorkmenTotals').textContent.includes('ยังไม่ระบุเพดาน')]),[null,null,true,true]);
+    await p.locator('.pr-workmen-details summary').click();
     await p.fill('#prWorkmenCap','60000'); await p.fill('#prWorkmenRate','0.2'); await p.fill('#prWorkmenAccount','WCF-TEST');
     check('explicit cap and employer rate produce capped annual preparation totals',await p.evaluate(()=>{const d=prWorkmenInput('2026',true);return [d.invalid,d.rows.map(r=>[r.name,r.wage,r.capped,r.contribution])];}),[false,[['พนักงานบี',15000,15000,30],['พนักงานเอ',86500,60000,120]]]);
     check('workmen contribution rounds once on the combined company wage base',await p.evaluate(()=>prWorkmenContribution({invalid:false,cap:100,rate:0.2,rows:[{capped:1},{capped:1},{capped:1}]})),0.01);
