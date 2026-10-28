@@ -522,6 +522,29 @@
   .pr-table .pr-in { width: 110px; text-align: right; }
   .pr-detail-row td { background: var(--bg-hover); white-space: normal; }
   .pr-detail-row details { max-width: calc(100vw - 64px); }
+  .pr-workmen { --workmen-blue:#6596d3; background:#fff; color:#25344a; padding:24px 12px; }
+  .pr-workmen-header { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:42px; }
+  .pr-workmen-header h2 { color:var(--workmen-blue); font-size:28px; font-weight:400; margin:0 0 4px; }
+  .pr-workmen-company { font-size:18px; font-weight:600; }
+  .pr-workmen-period { font-size:13px; line-height:1.9; margin:16px 0 0; }
+  .pr-workmen-summary { text-align:right; padding-top:72px; }
+  .pr-workmen-summary span,.pr-workmen-summary small { display:block; }
+  .pr-workmen-summary strong { display:block; color:var(--workmen-blue); font-size:32px; font-weight:400; font-variant-numeric:tabular-nums; }
+  .pr-workmen-summary small { color:#7b8798; font-size:12px; }
+  .pr-workmen-months .table-wrap { border:0; border-radius:0; }
+  .pr-workmen-months .data-table { width:100%; min-width:780px; }
+  .pr-workmen-months .data-table th { background:white; color:var(--workmen-blue); font-weight:400; border-bottom:2px solid var(--workmen-blue); padding:14px 12px; }
+  .pr-workmen-months .data-table td { padding:13px 12px; border-bottom:1px solid #edf2f8; font-variant-numeric:tabular-nums; }
+  .pr-workmen-months th:not(:first-child),.pr-workmen-months td:not(:first-child) { text-align:right; }
+  .pr-workmen-empty { display:flex; min-height:260px; align-items:center; justify-content:center; flex-direction:column; color:#cbdcf2; }
+  .pr-workmen-empty p { color:#8290a3; margin:16px 0 4px; }
+  .pr-workmen-empty span { color:#8290a3; font-size:13px; }
+  .pr-workmen-details { margin-top:28px; border-top:1px solid #dce6f2; }
+  .pr-workmen-details summary { cursor:pointer; padding:18px 0; color:#487ab8; font-weight:600; }
+  .pr-workmen-details summary span { color:#7b8798; font-size:12px; font-weight:400; margin-left:12px; }
+  .pr-workmen-detail-body { padding:4px 0 20px; }
+  .pr-report-paper .pr-workmen-months .data-table { min-width:0; }
+  @media(max-width:600px) { .pr-workmen { padding:16px 0; } .pr-workmen-header { flex-direction:column; gap:12px; margin-bottom:24px; } .pr-workmen-summary { text-align:left; padding-top:0; } .pr-workmen-details summary span { display:block; margin:6px 0 0; } }
   .pr-report-buttons { flex-wrap: wrap; margin: 12px 0; gap: 8px; }
   .pr-report-paper .table-wrap { overflow: visible; }
   .pr-report-paper table { width: 100%; table-layout: fixed; font-size: 10px; }
