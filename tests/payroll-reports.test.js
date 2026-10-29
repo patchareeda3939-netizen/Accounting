@@ -96,6 +96,18 @@ const L=require('./lib');
     await p.locator('#prReportContent tr').filter({hasText:'<b>Injected</b>'}).getByRole('button',{name:'ดูรายละเอียด'}).click();
     check('report names and employee keys cannot become HTML or executable handlers',await p.evaluate(()=>window.__reportUnsafe===undefined&&!byId('modalBody').querySelector('b')),true);
     await p.evaluate(async id=>{closeModal();await delRec('documents',id);},injected);
+    await p.evaluate(()=>openPrLeaveForm(null,'2026'));
+    await p.selectOption('#prLeaveEmp',ids.a); await p.selectOption('#prLeaveType','late');
+    check('late dropdown shows minutes instead of leave days',await p.evaluate(()=>[byId('prLateMinutesField').hidden,byId('prLeaveDays').closest('.field').hidden]),[false,true]);
+    await p.fill('#prLateMinutes','15'); await p.selectOption('#prLeaveStatus','approved');
+    await p.click('#modalFoot >> text=บันทึก'); await p.waitForFunction(()=>STORE.leaves.some(l=>l.leaveType==='late'));
+    check('saved lateness retains minutes and does not consume leave allowance',await p.evaluate(a=>{const l=STORE.leaves.find(l=>l.leaveType==='late');return [l.minutes,l.days,prLeaveBalances('2026').find(x=>x.key===a).types.annual.balance];},ids.a),[15,0,4]);
+    await p.evaluate(()=>openPrLeaveForm(STORE.leaves.find(l=>l.leaveType==='late')._id,'2026'));
+    check('editing lateness restores minutes and the selected type',await p.evaluate(()=>[byId('prLeaveType').value,byId('prLateMinutes').value,byId('prLateMinutesField').hidden]),['late','15',false]);
+    await p.selectOption('#prLeaveType','absence'); await p.fill('#prLeaveDays','1'); await p.selectOption('#prLeavePaid','no');
+    await p.click('#modalFoot >> text=บันทึก'); await p.waitForFunction(()=>STORE.leaves.some(l=>l.leaveType==='absence'));
+    check('absence records days separately without consuming leave',await p.evaluate(a=>{const l=STORE.leaves.find(l=>l.leaveType==='absence');return [l.days,l.minutes,l.paid,prLeaveBalances('2026').find(x=>x.key===a).types.annual.balance];},ids.a),[1,0,'no',4]);
+    check('invalid lateness duration or date range is rejected',await p.evaluate(()=>{const l={...STORE.leaves.find(l=>l.leaveType==='absence'),leaveType:'late',days:0};return [0,1.5,1441].every(minutes=>!!prLeaveError({...l,minutes}))&&!!prLeaveError({...l,minutes:15,endDate:'2026-01-02'});}),true);
     check('no browser errors in reports and leave workflows',p.errs,[]);
     console.log(`${passed} payroll report checks passed`);
   } finally {await browser.close();}
