@@ -10,8 +10,13 @@ function prReportButtons() {
     return '<button type="button" class="btn btn-outline" data-pr-report="' + r[0] + '" onclick="openPrReport(\'' + r[0] + '\')">' + r[1] + '</button>';
   }).join('') + '</div>';
 }
-var _prShellReports = prShell;
-prShell = function() { return _prShellReports() + prReportButtons(); };
+function prTeamReportKind(child) { return PR_REPORTS.find(function(r) { return child === 'payrollReport-'+r[0]; }); }
+function prTeamReportData(kind) {
+  var ym=pageState.prReportYm || pageState.prYm || todayStr().slice(0,7), year=pageState.prReportYear || ym.slice(0,4);
+  prReportState={kind:kind,year:year,ym:ym,company:CUR_CO};
+  var filter=kind === 'monthly' ? '<label for="prTeamMonth">เดือนที่จ่ายเงิน</label><input id="prTeamMonth" type="month" value="'+esc(ym)+'" onchange="if(this.value){pageState.prReportYm=this.value;refreshPageData()}">' : '<label for="prTeamYear">ปี ค.ศ. / พ.ศ.</label><input id="prTeamYear" type="number" value="'+esc(year)+'" onchange="var y=prYear(this.value);if(y){pageState.prReportYear=y;refreshPageData()}else{showToast(\'ระบุปีให้ถูกต้อง\')}">';
+  return '<div class="toolbar"><div class="field">'+filter+'</div><button class="btn btn-outline" onclick="prExportReport(prReportState.kind,prReportState.year,prReportState.ym)">ส่งออก CSV</button><button class="btn btn-outline" onclick="prPrintReport(prReportState.kind,prReportState.year,prReportState.ym)">ดู/พิมพ์</button></div><div id="prReportContent">'+prReportContent(kind,year,ym)+'</div>';
+}
 function prYear(value) { var y = Number(value); if (y > 2400) y -= 543; return Number.isInteger(y) && y >= 1900 && y <= 2200 ? String(y) : ''; }
 function prReportEntries(year, month) {
   var rows = [];
@@ -62,6 +67,7 @@ function openPrReport(kind, year, ym) {
   ym = ym || pageState.prYm || todayStr().slice(0,7); year = prYear(year || ym.slice(0,4));
   if (!year || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) { showToast('ระบุปีหรือเดือนให้ถูกต้อง'); return; }
   if (kind === 'monthly') year=ym.slice(0,4);
+  if (route.key === 'team' && prTeamReportKind(route.child)) { closeModal(); pageState.prReportYear=year; pageState.prReportYm=ym; go('team','payrollReport-'+kind); return; }
   prReportState={kind:kind,year:year,ym:ym,company:CUR_CO};
   var title=PR_REPORTS.find(function(r) { return r[0] === kind; })[1];
   var filter=kind === 'monthly' ? '<label for="prReportMonth">เดือนที่จ่ายเงิน</label><input id="prReportMonth" type="month" value="' + ym + '" onchange="openPrReport(\'monthly\',null,this.value)">' : '<label for="prReportYear">ปี ค.ศ. / พ.ศ.</label><input id="prReportYear" type="number" value="' + year + '" onchange="openPrReport(\'' + kind + '\',this.value)">';

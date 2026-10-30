@@ -2863,7 +2863,14 @@ var SUBNAV_ITEMS = [
     ] },
   { key:'team',       label:'ทีมงาน', color:'#3A6B8A', icon:'🧑‍🤝‍🧑', children: [
       { key:'employees', label:'พนักงาน' },
-      { key:'payroll', label:'เงินเดือน' }
+      { key:'payroll', label:'เงินเดือน' },
+      { key:'payrollReport-monthly', label:'เงินเดือน/ค่าจ้าง' },
+      { key:'payrollReport-cert', label:'เอกสาร 50 ทวิ' },
+      { key:'payrollReport-ytd', label:'เงินเดือน/ค่าจ้างสะสม' },
+      { key:'payrollReport-leave', label:'รายงานการลา' },
+      { key:'payrollReport-leaveDetail', label:'รายละเอียดการลา' },
+      { key:'payrollReport-workmen', label:'เอกสาร กท.20 ก' },
+      { key:'attendanceSettings', label:'ตั้งค่าหักมาสาย / ขาดงาน' }
     ] },
   { key:'project',    label:'โครงการและแผนก', color:'#1B2E3A', icon:'📁', children: [
       { key:'list', label:'โครงการ' },
@@ -3006,6 +3013,8 @@ function renderPage() {
   else if (pid === 'tax:inputVat') shell = ivShell();
   else if (pid === 'billing:pettyCash') shell = pcShell();
   else if (pid === 'team:payroll') shell = prShell();
+  else if (k === 'team' && prTeamReportKind(ch)) shell = pageHead(prTeamReportKind(ch)[1], 'รายงานจากข้อมูลของบริษัท');
+  else if (pid === 'team:attendanceSettings') shell = pageHead('ตั้งค่าหักมาสาย / ขาดงาน', 'กำหนดวิธีคำนวณรายการหักจากข้อมูลที่อนุมัติ');
   else if (pid === 'billing:advances') shell = advShell();
   else if (pid === 'settings:forms') shell = formsShell();
   else if (pid === 'settings:company') shell = companyPageShell();
@@ -3073,6 +3082,8 @@ function refreshPageData() {
   else if (pid === 'reports:cashflow') html = cashOverviewData();
   else if (k === 'reports' && ch !== 'performance') html = '';
   else if (pid === 'team:employees') html = empData();
+  else if (k === 'team' && prTeamReportKind(ch)) html = prTeamReportData(prTeamReportKind(ch)[0]);
+  else if (pid === 'team:attendanceSettings') html = prAttendanceSettingsPage();
   else if (pid === 'project:overview') html = projOvData();
   else if (pid === 'project:list') html = dimData('projects');
   else if (pid === 'project:dept') html = dimData('departments');
@@ -3086,6 +3097,7 @@ function refreshPageData() {
   else if (k === 'tax') html = taxData();
   else if (k === 'reports') html = reportsData();
   el.innerHTML = html;
+  if (pid === 'team:payrollReport-workmen') prUpdateWorkmen(prReportState.year);
   if (pid === 'reports:performance' || pid === 'reports:cashflow' || pid === 'sales:overview') bindChart();
   if (pid === 'reports:standard') bindStdReports();
   if (pid === 'reports:view') bindReportView();
@@ -9230,8 +9242,13 @@ function prReportButtons() {
     return '<button type="button" class="btn btn-outline" data-pr-report="' + r[0] + '" onclick="openPrReport(\'' + r[0] + '\')">' + r[1] + '</button>';
   }).join('') + '</div>';
 }
-var _prShellReports = prShell;
-prShell = function() { return _prShellReports() + prReportButtons(); };
+function prTeamReportKind(child) { return PR_REPORTS.find(function(r) { return child === 'payrollReport-'+r[0]; }); }
+function prTeamReportData(kind) {
+  var ym=pageState.prReportYm || pageState.prYm || todayStr().slice(0,7), year=pageState.prReportYear || ym.slice(0,4);
+  prReportState={kind:kind,year:year,ym:ym,company:CUR_CO};
+  var filter=kind === 'monthly' ? '<label for="prTeamMonth">เดือนที่จ่ายเงิน</label><input id="prTeamMonth" type="month" value="'+esc(ym)+'" onchange="if(this.value){pageState.prReportYm=this.value;refreshPageData()}">' : '<label for="prTeamYear">ปี ค.ศ. / พ.ศ.</label><input id="prTeamYear" type="number" value="'+esc(year)+'" onchange="var y=prYear(this.value);if(y){pageState.prReportYear=y;refreshPageData()}else{showToast(\'ระบุปีให้ถูกต้อง\')}">';
+  return '<div class="toolbar"><div class="field">'+filter+'</div><button class="btn btn-outline" onclick="prExportReport(prReportState.kind,prReportState.year,prReportState.ym)">ส่งออก CSV</button><button class="btn btn-outline" onclick="prPrintReport(prReportState.kind,prReportState.year,prReportState.ym)">ดู/พิมพ์</button></div><div id="prReportContent">'+prReportContent(kind,year,ym)+'</div>';
+}
 function prYear(value) { var y = Number(value); if (y > 2400) y -= 543; return Number.isInteger(y) && y >= 1900 && y <= 2200 ? String(y) : ''; }
 function prReportEntries(year, month) {
   var rows = [];
@@ -9282,6 +9299,7 @@ function openPrReport(kind, year, ym) {
   ym = ym || pageState.prYm || todayStr().slice(0,7); year = prYear(year || ym.slice(0,4));
   if (!year || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) { showToast('ระบุปีหรือเดือนให้ถูกต้อง'); return; }
   if (kind === 'monthly') year=ym.slice(0,4);
+  if (route.key === 'team' && prTeamReportKind(route.child)) { closeModal(); pageState.prReportYear=year; pageState.prReportYm=ym; go('team','payrollReport-'+kind); return; }
   prReportState={kind:kind,year:year,ym:ym,company:CUR_CO};
   var title=PR_REPORTS.find(function(r) { return r[0] === kind; })[1];
   var filter=kind === 'monthly' ? '<label for="prReportMonth">เดือนที่จ่ายเงิน</label><input id="prReportMonth" type="month" value="' + ym + '" onchange="openPrReport(\'monthly\',null,this.value)">' : '<label for="prReportYear">ปี ค.ศ. / พ.ศ.</label><input id="prReportYear" type="number" value="' + year + '" onchange="openPrReport(\'' + kind + '\',this.value)">';
@@ -9521,11 +9539,13 @@ function openPrAttendanceSettings() {
       var v={mode:byId('paMode').value,minutes:Number(byId('paMinutes').value),amount:byId('paAmount').value === '' ? NaN : Number(byId('paAmount').value),rounding:byId('paRounding').value,divisor:Number(byId('paDivisor').value)};
       if ((v.mode === 'interval' && (!Number.isInteger(v.minutes) || v.minutes<1 || !Number.isFinite(v.amount) || v.amount<0 || round2(v.amount)!==v.amount)) || !Number.isInteger(v.divisor) || v.divisor<1 || v.divisor>31) { byId('paError').hidden=false; byId('paError').textContent='ระบุนาทีและตัวหารเป็นจำนวนเต็ม จำนวนเงินตั้งแต่ศูนย์ ทศนิยมไม่เกินสองตำแหน่ง'; return; }
       if (v.mode === 'salary') { v.minutes=1; v.amount=0; v.rounding='ceil'; }
-      btn.disabled=true; try { await saveSettings('payrollAttendance',v); closeModal(); showToast('บันทึกนโยบายแล้ว'); } catch(e) { btn.disabled=false; byId('paError').hidden=false; byId('paError').textContent=writeError(e); }
+      btn.disabled=true; try { await saveSettings('payrollAttendance',v); closeModal(); refreshPageData(); showToast('บันทึกนโยบายแล้ว'); } catch(e) { btn.disabled=false; byId('paError').hidden=false; byId('paError').textContent=writeError(e); }
     }}],onMount:prAttendanceModeFields});
 }
-var _prShellAttendance=prShell;
-prShell=function() { return _prShellAttendance()+(fbReadOnly() ? '' : '<div class="toolbar"><button class="btn btn-outline" type="button" onclick="openPrAttendanceSettings()">ตั้งค่าหักมาสาย / ขาดงาน</button></div>'); };
+function prAttendanceSettingsPage() {
+  var c=prAttendancePolicy();
+  return '<div class="page-block"><p>วิธีหักมาสาย: '+(c.mode === 'interval' ? 'ทุก '+fmtNum(c.minutes)+' นาที หัก '+fmtMoney(c.amount)+' บาท' : 'เงินเดือน ÷ 30 ÷ 8 ÷ 60 × นาทีที่สาย ปัดขึ้นเป็นบาทเต็ม')+'</p><p>ขาดงาน: เงินเดือน ÷ '+fmtNum(c.divisor || 30)+' × จำนวนวัน</p>'+(fbReadOnly() ? '<p class="muted">สิทธิ์ผู้ดู อ่านการตั้งค่าได้</p>' : '<button class="btn btn-dark" onclick="openPrAttendanceSettings()">แก้ไขการตั้งค่า</button>')+'</div>';
+}
 function prAttendanceDeduction(line,ym,c) {
   var mode=c.mode || 'salary';
   if (!['salary','interval'].includes(mode) || (mode === 'interval' && (!Number.isInteger(c.minutes) || c.minutes<1 || !Number.isFinite(c.amount) || c.amount<0 || !['floor','ceil'].includes(c.rounding))) || !Number.isInteger(c.divisor) || c.divisor<1 || c.divisor>31) throw Error('กรุณาตั้งค่าหักมาสาย / ขาดงานก่อน');
