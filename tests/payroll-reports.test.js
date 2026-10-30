@@ -125,6 +125,13 @@ const L=require('./lib');
     check('salary-based lateness uses full precision and rounds up once per event',await p.evaluate(a=>{const before=STORE.leaves;try{STORE.leaves=[{_id:'salary-late',empId:a,leaveType:'late',status:'approved',startDate:'2026-01-01',endDate:'2026-01-01',days:0,minutes:28,paid:'yes'}];return [40000,36000,0].map(base=>prAttendanceDeduction({empId:a,base},'2026-01',{mode:'salary',divisor:30}).late);}finally{STORE.leaves=before;}},ids.a),[78,70,0]);
     await p.evaluate(()=>{closeModal();openPrAttendanceSettings();});await p.selectOption('#paMode','salary');await p.click('#modalFoot >> text=บันทึก');
     check('salary policy saves without interval amounts and keeps the 30-day absence divisor',await p.evaluate(()=>[prAttendancePolicy().mode,prAttendancePolicy().divisor]),['salary',30]);
+    await p.evaluate(()=>{closeModal();go('team','employees');});
+    await p.locator('tr[data-emp="'+ids.a+'"] button:has-text("ขอลา")').click();await p.fill('#elNote','ขอลาพักร้อน');
+    await p.click('#modalFoot >> text=ส่งคำขออนุมัติ');await p.waitForFunction(()=>STORE.leaves.some(l=>l.workflow==='request'));
+    check('employee page submits a pending leave request with requester identity',await p.evaluate(()=>{const l=STORE.leaves.find(l=>l.workflow==='request');return [l.status,l.requestedBy,l.note];}),['pending','local','ขอลาพักร้อน']);
+    await p.evaluate(()=>empReviewLeave(STORE.leaves.find(l=>l.workflow==='request')._id));await p.fill('#elReviewNote','ตรวจสิทธิแล้ว');await p.click('#modalFoot >> text=บันทึกผลพิจารณา');await p.waitForFunction(()=>STORE.leaves.some(l=>l.workflow==='request'&&l.status==='approved'));
+    check('review records approver and prevents revisiting a completed decision',await p.evaluate(async()=>{const l=STORE.leaves.find(l=>l.workflow==='request');let blocked=false;try{await empWriteLeaveDecision(l._id,CUR_CO,'rejected','','yes')}catch(e){blocked=true}return [l.reviewedBy,l.reviewNote,blocked];}),['local','ตรวจสิทธิแล้ว',true]);
+    check('cloud approvals require another owner account',await p.evaluate(()=>{FB_MODE=true;CUR_ROLE='editor';const editor=empCanApproveLeave({requestedBy:'someone-else'});CUR_ROLE='owner';const self=empCanApproveLeave({requestedBy:empLeaveActor()});const other=empCanApproveLeave({requestedBy:'someone-else'});FB_MODE=false;CUR_ROLE=null;return [editor,self,other];}),[false,false,true]);
     check('no browser errors in reports and leave workflows',p.errs,[]);
     console.log(`${passed} payroll report checks passed`);
   } finally {await browser.close();}
