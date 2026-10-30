@@ -109,7 +109,7 @@ const L=require('./lib');
     check('absence records days separately without consuming leave',await p.evaluate(a=>{const l=STORE.leaves.find(l=>l.leaveType==='absence');return [l.days,l.minutes,l.paid,prLeaveBalances('2026').find(x=>x.key===a).types.annual.balance];},ids.a),[1,0,'no',4]);
     check('invalid lateness duration or date range is rejected',await p.evaluate(()=>{const l={...STORE.leaves.find(l=>l.leaveType==='absence'),leaveType:'late',days:0};return [0,1.5,1441].every(minutes=>!!prLeaveError({...l,minutes}))&&!!prLeaveError({...l,minutes:15,endDate:'2026-01-02'});}),true);
     const deduction=await p.evaluate(async a=>{
-      await saveSettings('payrollAttendance',{minutes:15,amount:50,rounding:'floor',divisor:30});
+      await saveSettings('payrollAttendance',{mode:'interval',minutes:15,amount:50,rounding:'floor',divisor:30});
       await addRec('leaves',{empId:a,name:'พนักงานเอ',leaveType:'late',status:'approved',startDate:'2026-01-03',endDate:'2026-01-03',days:0,minutes:20,paid:'yes'});
       await addRec('leaves',{empId:a,name:'พนักงานเอ',leaveType:'late',status:'pending',startDate:'2026-01-04',endDate:'2026-01-04',days:0,minutes:60,paid:'yes'});
       await addRec('leaves',{empId:a,name:'พนักงานเอ',leaveType:'absence',status:'approved',startDate:'2026-01-05',endDate:'2026-01-05',days:1,paid:'no'});
@@ -122,6 +122,9 @@ const L=require('./lib');
     check('reapplying attendance replaces deductions without double charging',deduction.repeat,[true,true,true]);
     check('applied deductions retain their policy snapshot',deduction.snapshot,15);
     check('attendance crossing payroll months is blocked for explicit splitting',await p.evaluate(a=>{const l={_id:'cross-month',empId:a,leaveType:'absence',status:'approved',startDate:'2026-01-31',endDate:'2026-02-01',days:2,paid:'no'};STORE.leaves.push(l);let blocked=false;try{prAttendanceDeduction({empId:a,base:30000},'2026-02',prAttendancePolicy())}catch(e){blocked=e.message.includes('คร่อมเดือน')}STORE.leaves.pop();return blocked;},ids.a),true);
+    check('salary-based lateness uses full precision and rounds up once per event',await p.evaluate(a=>{const before=STORE.leaves;try{STORE.leaves=[{_id:'salary-late',empId:a,leaveType:'late',status:'approved',startDate:'2026-01-01',endDate:'2026-01-01',days:0,minutes:28,paid:'yes'}];return [40000,36000,0].map(base=>prAttendanceDeduction({empId:a,base},'2026-01',{mode:'salary',divisor:30}).late);}finally{STORE.leaves=before;}},ids.a),[78,70,0]);
+    await p.evaluate(()=>{closeModal();openPrAttendanceSettings();});await p.selectOption('#paMode','salary');await p.click('#modalFoot >> text=บันทึก');
+    check('salary policy saves without interval amounts and keeps the 30-day absence divisor',await p.evaluate(()=>[prAttendancePolicy().mode,prAttendancePolicy().divisor]),['salary',30]);
     check('no browser errors in reports and leave workflows',p.errs,[]);
     console.log(`${passed} payroll report checks passed`);
   } finally {await browser.close();}
