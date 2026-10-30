@@ -12,11 +12,13 @@ function openPrAttendanceSettings() {
       var v={mode:byId('paMode').value,minutes:Number(byId('paMinutes').value),amount:byId('paAmount').value === '' ? NaN : Number(byId('paAmount').value),rounding:byId('paRounding').value,divisor:Number(byId('paDivisor').value)};
       if ((v.mode === 'interval' && (!Number.isInteger(v.minutes) || v.minutes<1 || !Number.isFinite(v.amount) || v.amount<0 || round2(v.amount)!==v.amount)) || !Number.isInteger(v.divisor) || v.divisor<1 || v.divisor>31) { byId('paError').hidden=false; byId('paError').textContent='ระบุนาทีและตัวหารเป็นจำนวนเต็ม จำนวนเงินตั้งแต่ศูนย์ ทศนิยมไม่เกินสองตำแหน่ง'; return; }
       if (v.mode === 'salary') { v.minutes=1; v.amount=0; v.rounding='ceil'; }
-      btn.disabled=true; try { await saveSettings('payrollAttendance',v); closeModal(); showToast('บันทึกนโยบายแล้ว'); } catch(e) { btn.disabled=false; byId('paError').hidden=false; byId('paError').textContent=writeError(e); }
+      btn.disabled=true; try { await saveSettings('payrollAttendance',v); closeModal(); refreshPageData(); showToast('บันทึกนโยบายแล้ว'); } catch(e) { btn.disabled=false; byId('paError').hidden=false; byId('paError').textContent=writeError(e); }
     }}],onMount:prAttendanceModeFields});
 }
-var _prShellAttendance=prShell;
-prShell=function() { return _prShellAttendance()+(fbReadOnly() ? '' : '<div class="toolbar"><button class="btn btn-outline" type="button" onclick="openPrAttendanceSettings()">ตั้งค่าหักมาสาย / ขาดงาน</button></div>'); };
+function prAttendanceSettingsPage() {
+  var c=prAttendancePolicy();
+  return '<div class="page-block"><p>วิธีหักมาสาย: '+(c.mode === 'interval' ? 'ทุก '+fmtNum(c.minutes)+' นาที หัก '+fmtMoney(c.amount)+' บาท' : 'เงินเดือน ÷ 30 ÷ 8 ÷ 60 × นาทีที่สาย ปัดขึ้นเป็นบาทเต็ม')+'</p><p>ขาดงาน: เงินเดือน ÷ '+fmtNum(c.divisor || 30)+' × จำนวนวัน</p>'+(fbReadOnly() ? '<p class="muted">สิทธิ์ผู้ดู อ่านการตั้งค่าได้</p>' : '<button class="btn btn-dark" onclick="openPrAttendanceSettings()">แก้ไขการตั้งค่า</button>')+'</div>';
+}
 function prAttendanceDeduction(line,ym,c) {
   var mode=c.mode || 'salary';
   if (!['salary','interval'].includes(mode) || (mode === 'interval' && (!Number.isInteger(c.minutes) || c.minutes<1 || !Number.isFinite(c.amount) || c.amount<0 || !['floor','ceil'].includes(c.rounding))) || !Number.isInteger(c.divisor) || c.divisor<1 || c.divisor>31) throw Error('กรุณาตั้งค่าหักมาสาย / ขาดงานก่อน');

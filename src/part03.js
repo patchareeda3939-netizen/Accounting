@@ -171,7 +171,14 @@ var SUBNAV_ITEMS = [
     ] },
   { key:'team',       label:'ทีมงาน', color:'#3A6B8A', icon:'🧑‍🤝‍🧑', children: [
       { key:'employees', label:'พนักงาน' },
-      { key:'payroll', label:'เงินเดือน' }
+      { key:'payroll', label:'เงินเดือน' },
+      { key:'payrollReport-monthly', label:'เงินเดือน/ค่าจ้าง' },
+      { key:'payrollReport-cert', label:'เอกสาร 50 ทวิ' },
+      { key:'payrollReport-ytd', label:'เงินเดือน/ค่าจ้างสะสม' },
+      { key:'payrollReport-leave', label:'รายงานการลา' },
+      { key:'payrollReport-leaveDetail', label:'รายละเอียดการลา' },
+      { key:'payrollReport-workmen', label:'เอกสาร กท.20 ก' },
+      { key:'attendanceSettings', label:'ตั้งค่าหักมาสาย / ขาดงาน' }
     ] },
   { key:'project',    label:'โครงการและแผนก', color:'#1B2E3A', icon:'📁', children: [
       { key:'list', label:'โครงการ' },
@@ -314,6 +321,8 @@ function renderPage() {
   else if (pid === 'tax:inputVat') shell = ivShell();
   else if (pid === 'billing:pettyCash') shell = pcShell();
   else if (pid === 'team:payroll') shell = prShell();
+  else if (k === 'team' && prTeamReportKind(ch)) shell = pageHead(prTeamReportKind(ch)[1], 'รายงานจากข้อมูลของบริษัท');
+  else if (pid === 'team:attendanceSettings') shell = pageHead('ตั้งค่าหักมาสาย / ขาดงาน', 'กำหนดวิธีคำนวณรายการหักจากข้อมูลที่อนุมัติ');
   else if (pid === 'billing:advances') shell = advShell();
   else if (pid === 'settings:forms') shell = formsShell();
   else if (pid === 'settings:company') shell = companyPageShell();
@@ -381,6 +390,8 @@ function refreshPageData() {
   else if (pid === 'reports:cashflow') html = cashOverviewData();
   else if (k === 'reports' && ch !== 'performance') html = '';
   else if (pid === 'team:employees') html = empData();
+  else if (k === 'team' && prTeamReportKind(ch)) html = prTeamReportData(prTeamReportKind(ch)[0]);
+  else if (pid === 'team:attendanceSettings') html = prAttendanceSettingsPage();
   else if (pid === 'project:overview') html = projOvData();
   else if (pid === 'project:list') html = dimData('projects');
   else if (pid === 'project:dept') html = dimData('departments');
@@ -394,6 +405,7 @@ function refreshPageData() {
   else if (k === 'tax') html = taxData();
   else if (k === 'reports') html = reportsData();
   el.innerHTML = html;
+  if (pid === 'team:payrollReport-workmen') prUpdateWorkmen(prReportState.year);
   if (pid === 'reports:performance' || pid === 'reports:cashflow' || pid === 'sales:overview') bindChart();
   if (pid === 'reports:standard') bindStdReports();
   if (pid === 'reports:view') bindReportView();

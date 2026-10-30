@@ -204,9 +204,24 @@ service cloud.firestore {
           && existsAfter(auditPath(co, 'bdel_' + code + '_' + string(resource.data.createdAt)));
       }
 
+      match /leaves/{id} {
+        allow create: if canEdit(co) && (request.resource.data.get('workflow', '') != 'request'
+          || (request.resource.data.status == 'pending' && request.resource.data.requestedBy == request.auth.uid
+            && !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewedByName'])));
+        allow update: if canEdit(co) && (resource.data.get('workflow', '') != 'request'
+          ? request.resource.data.get('workflow', '') != 'request'
+          : resource.data.status == 'pending' && (
+            (isOwner(co) && resource.data.requestedBy != request.auth.uid
+              && request.resource.data.status in ['approved', 'rejected']
+              && request.resource.data.reviewedBy == request.auth.uid
+              && changed().hasOnly(['status', 'paid', 'reviewNote', 'reviewedBy', 'reviewedByName', 'reviewedAt']))
+            || (resource.data.requestedBy == request.auth.uid && request.resource.data.status == 'cancelled'
+              && changed().hasOnly(['status', 'cancelledAt']))));
+        allow delete: if canEdit(co) && resource.data.get('workflow', '') != 'request';
+      }
       match /{coll}/{id} {
         allow read: if !(coll in ['members', 'audit']) && isMember(co);
-        allow write: if !(coll in ['members', 'audit', 'branches']) && canEdit(co)
+        allow write: if !(coll in ['members', 'audit', 'branches', 'leaves']) && canEdit(co)
           && (!touchesLegal(coll, id) || isOwner(co))
           && (!lockChanged(coll, id) || lockWriteOk(co))
           && (coll != 'documents' || request.method == 'delete' || docBranchOk(co))

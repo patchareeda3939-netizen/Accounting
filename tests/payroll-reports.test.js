@@ -21,10 +21,11 @@ const L=require('./lib');
       await addRec('documents',{type:'payroll',group:'other',date:'2027-01-10',docNo:'PR-NEXT',extra:{period:'2026-12'},items:[y]});
       pageState.prYm='2026-01'; go('team','payroll'); return {a,b,d1,d2};
     });
-    check('six report buttons appear and every report opens without runtime errors',await p.evaluate(()=>{
-      const buttons=[...document.querySelectorAll('[data-pr-report]')];
-      return [buttons.length,buttons.every(b=>{b.click();return !!byId('prReportContent');})];
-    }),[6,true]);
+    check('six team report pages render directly without payroll report buttons',await p.evaluate(()=>{
+      const payrollButtons=document.querySelectorAll('[data-pr-report]').length;
+      return [payrollButtons,PR_REPORTS.every(r=>{go('team','payrollReport-'+r[0]);return !!byId('prReportContent');})];
+    }),[0,true]);
+    check('attendance settings has its own team page',await p.evaluate(()=>{go('team','attendanceSettings');return byId('pageData').textContent.includes('แก้ไขการตั้งค่า');}),true);
     check('monthly reports follow payment month, include zero-tax employees and exclude voids',await p.evaluate(()=>prReportEntries('2026','2026-01').map(r=>[r.d.docNo,r.name,r.income,r.wht])),[['PR-JAN','พนักงานเอ',44500,800],['PR-JAN','พนักงานบี',15000,0]]);
     check('YTD includes resigned employees and sums actual paid-year taxable income, funds and net pay',await p.evaluate(()=>prYtdRows('2026').map(r=>[r.name,r.entries.length,r.income,r.taxable,r.deductions,r.sso,r.wht,r.pvd,r.net])),[['พนักงานบี',1,15000,15000,750,750,0,0,14250],['พนักงานเอ',2,89500,86500,7100,1750,1750,2100,82400]]);
     await p.evaluate(()=>{closeModal();go('tax','wht');});
@@ -125,6 +126,13 @@ const L=require('./lib');
     check('salary-based lateness uses full precision and rounds up once per event',await p.evaluate(a=>{const before=STORE.leaves;try{STORE.leaves=[{_id:'salary-late',empId:a,leaveType:'late',status:'approved',startDate:'2026-01-01',endDate:'2026-01-01',days:0,minutes:28,paid:'yes'}];return [40000,36000,0].map(base=>prAttendanceDeduction({empId:a,base},'2026-01',{mode:'salary',divisor:30}).late);}finally{STORE.leaves=before;}},ids.a),[78,70,0]);
     await p.evaluate(()=>{closeModal();openPrAttendanceSettings();});await p.selectOption('#paMode','salary');await p.click('#modalFoot >> text=บันทึก');
     check('salary policy saves without interval amounts and keeps the 30-day absence divisor',await p.evaluate(()=>[prAttendancePolicy().mode,prAttendancePolicy().divisor]),['salary',30]);
+    await p.evaluate(()=>{closeModal();go('team','employees');});
+    await p.locator('tr[data-emp="'+ids.a+'"] button:has-text("ขอลา")').click();await p.fill('#elNote','ขอลาพักร้อน');
+    await p.click('#modalFoot >> text=ส่งคำขออนุมัติ');await p.waitForFunction(()=>STORE.leaves.some(l=>l.workflow==='request'));
+    check('employee page submits a pending leave request with requester identity',await p.evaluate(()=>{const l=STORE.leaves.find(l=>l.workflow==='request');return [l.status,l.requestedBy,l.note];}),['pending','local','ขอลาพักร้อน']);
+    await p.evaluate(()=>empReviewLeave(STORE.leaves.find(l=>l.workflow==='request')._id));await p.fill('#elReviewNote','ตรวจสิทธิแล้ว');await p.click('#modalFoot >> text=บันทึกผลพิจารณา');await p.waitForFunction(()=>STORE.leaves.some(l=>l.workflow==='request'&&l.status==='approved'));
+    check('review records approver and prevents revisiting a completed decision',await p.evaluate(async()=>{const l=STORE.leaves.find(l=>l.workflow==='request');let blocked=false;try{await empWriteLeaveDecision(l._id,CUR_CO,'rejected','','yes')}catch(e){blocked=true}return [l.reviewedBy,l.reviewNote,blocked];}),['local','ตรวจสิทธิแล้ว',true]);
+    check('cloud approvals require another owner account',await p.evaluate(()=>{FB_MODE=true;CUR_ROLE='editor';const editor=empCanApproveLeave({requestedBy:'someone-else'});CUR_ROLE='owner';const self=empCanApproveLeave({requestedBy:empLeaveActor()});const other=empCanApproveLeave({requestedBy:'someone-else'});FB_MODE=false;CUR_ROLE=null;return [editor,self,other];}),[false,false,true]);
     check('no browser errors in reports and leave workflows',p.errs,[]);
     console.log(`${passed} payroll report checks passed`);
   } finally {await browser.close();}
