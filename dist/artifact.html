@@ -9508,32 +9508,38 @@ function prExportWorkmen(year) {
 }
 /* นโยบายหักมาสาย/ขาดงาน: ใช้รายการอนุมัติและให้ตรวจยอดก่อนลงบัญชี */
 function prAttendancePolicy() { return STORE.settings.find(function(s) { return s._id === 'payrollAttendance'; }) || {}; }
+function prAttendanceModeFields() { byId('paIntervalFields').hidden=byId('paMode').value !== 'interval'; }
 function openPrAttendanceSettings() {
   if (fbReadOnly()) return;
   var co=CUR_CO, c=prAttendancePolicy();
   openModal({title:'ตั้งค่าหักมาสาย / ขาดงาน',body:
-    '<div class="grid-2"><div class="field"><label for="paMinutes">มาสายทุกกี่นาที</label><input id="paMinutes" type="number" min="1" step="1" value="'+esc(String(c.minutes || ''))+'"></div><div class="field"><label for="paAmount">หักกี่บาทต่อช่วง</label><input id="paAmount" type="number" min="0" step="0.01" value="'+esc(String(c.amount == null ? '' : c.amount))+'"></div></div>'+
-    '<div class="field"><label for="paRounding">เศษนาทีต่อครั้ง</label><select id="paRounding">'+pcOpts([['floor','นับเฉพาะช่วงที่ครบ'],['ceil','ปัดขึ้นเป็นหนึ่งช่วง']],c.rounding || 'floor')+'</select></div>'+
+    '<div class="field"><label for="paMode">วิธีคำนวณมาสาย</label><select id="paMode" onchange="prAttendanceModeFields()">'+pcOpts([['salary','ตามค่าจ้างจริง: เงินเดือน ÷ 30 ÷ 8 ÷ 60 × นาที ปัดขึ้นเป็นบาท'],['interval','กำหนดจำนวนเงินต่อช่วงนาที']],c.mode || 'salary')+'</select></div><p class="small muted">สูตรค่าจ้างจริงใช้ฐาน 30 วัน / 8 ชั่วโมง คำนวณเต็มความละเอียด แล้วปัดขึ้นเป็นบาทเต็มแยกแต่ละครั้ง เช่น 40,000 บาท สาย 28 นาที หัก 78 บาท</p><div id="paIntervalFields"><div class="grid-2"><div class="field"><label for="paMinutes">มาสายทุกกี่นาที</label><input id="paMinutes" type="number" min="1" step="1" value="'+esc(String(c.minutes || ''))+'"></div><div class="field"><label for="paAmount">หักกี่บาทต่อช่วง</label><input id="paAmount" type="number" min="0" step="0.01" value="'+esc(String(c.amount == null ? '' : c.amount))+'"></div></div>'+
+    '<div class="field"><label for="paRounding">เศษนาทีต่อครั้ง</label><select id="paRounding">'+pcOpts([['floor','นับเฉพาะช่วงที่ครบ'],['ceil','ปัดขึ้นเป็นหนึ่งช่วง']],c.rounding || 'floor')+'</select></div></div>'+
     '<div class="field"><label for="paDivisor">ขาดงานหักเต็มวัน: เงินเดือน ÷</label><input id="paDivisor" type="number" min="1" max="31" step="1" value="'+esc(String(c.divisor || 30))+'" placeholder="เช่น 30 หรือตามวันทำงานจริง"></div><p class="small muted">ขาดงานหักตามจำนวนวันที่อนุมัติ × ค่าจ้างเต็มวันจากเงินเดือนพื้นฐาน หากใช้วันทำงานจริงให้แก้ตัวหารให้ตรงเดือนก่อนนำเข้า · มาสายคิดแยกแต่ละครั้ง · การตั้งค่านี้ไม่เปลี่ยนรอบเงินเดือนที่บันทึกแล้ว</p><div id="paError" class="form-error" hidden></div>',buttons:[CANCEL_BTN,{label:'บันทึก',cls:'btn-dark',onClick:async function(btn) {
       if (fbReadOnly() || !prReportCompanyOk(co)) return;
-      var v={minutes:Number(byId('paMinutes').value),amount:byId('paAmount').value === '' ? NaN : Number(byId('paAmount').value),rounding:byId('paRounding').value,divisor:Number(byId('paDivisor').value)};
-      if (!Number.isInteger(v.minutes) || v.minutes<1 || !Number.isFinite(v.amount) || v.amount<0 || round2(v.amount)!==v.amount || !Number.isInteger(v.divisor) || v.divisor<1 || v.divisor>31) { byId('paError').hidden=false; byId('paError').textContent='ระบุนาทีและตัวหารเป็นจำนวนเต็ม จำนวนเงินตั้งแต่ศูนย์ ทศนิยมไม่เกินสองตำแหน่ง'; return; }
+      var v={mode:byId('paMode').value,minutes:Number(byId('paMinutes').value),amount:byId('paAmount').value === '' ? NaN : Number(byId('paAmount').value),rounding:byId('paRounding').value,divisor:Number(byId('paDivisor').value)};
+      if ((v.mode === 'interval' && (!Number.isInteger(v.minutes) || v.minutes<1 || !Number.isFinite(v.amount) || v.amount<0 || round2(v.amount)!==v.amount)) || !Number.isInteger(v.divisor) || v.divisor<1 || v.divisor>31) { byId('paError').hidden=false; byId('paError').textContent='ระบุนาทีและตัวหารเป็นจำนวนเต็ม จำนวนเงินตั้งแต่ศูนย์ ทศนิยมไม่เกินสองตำแหน่ง'; return; }
+      if (v.mode === 'salary') { v.minutes=1; v.amount=0; v.rounding='ceil'; }
       btn.disabled=true; try { await saveSettings('payrollAttendance',v); closeModal(); showToast('บันทึกนโยบายแล้ว'); } catch(e) { btn.disabled=false; byId('paError').hidden=false; byId('paError').textContent=writeError(e); }
-    }}]});
+    }}],onMount:prAttendanceModeFields});
 }
 var _prShellAttendance=prShell;
 prShell=function() { return _prShellAttendance()+(fbReadOnly() ? '' : '<div class="toolbar"><button class="btn btn-outline" type="button" onclick="openPrAttendanceSettings()">ตั้งค่าหักมาสาย / ขาดงาน</button></div>'); };
 function prAttendanceDeduction(line,ym,c) {
-  if (!Number.isInteger(c.minutes) || c.minutes<1 || !Number.isFinite(c.amount) || c.amount<0 || !Number.isInteger(c.divisor) || c.divisor<1 || c.divisor>31 || !['floor','ceil'].includes(c.rounding)) throw Error('กรุณาตั้งค่าหักมาสาย / ขาดงานก่อน');
+  var mode=c.mode || 'salary';
+  if (!['salary','interval'].includes(mode) || (mode === 'interval' && (!Number.isInteger(c.minutes) || c.minutes<1 || !Number.isFinite(c.amount) || c.amount<0 || !['floor','ceil'].includes(c.rounding))) || !Number.isInteger(c.divisor) || c.divisor<1 || c.divisor>31) throw Error('กรุณาตั้งค่าหักมาสาย / ขาดงานก่อน');
   var records=(STORE.leaves || []).filter(function(l) { return l.empId===line.empId && l.status==='approved' && ['late','absence'].includes(l.leaveType) && l.startDate.slice(0,7)<=ym && l.endDate.slice(0,7)>=ym; });
   var late=0,days=0;
   records.forEach(function(l) {
     if (l.startDate.slice(0,7)!==ym || l.endDate.slice(0,7)!==ym) throw Error('รายการขาดงานคร่อมเดือน กรุณาแยกบันทึกตามเดือนก่อนนำเข้า');
     var error=prLeaveError(l); if (error) throw Error(error);
-    if (l.leaveType==='late') late+=(c.rounding==='ceil' ? Math.ceil(l.minutes/c.minutes) : Math.floor(l.minutes/c.minutes))*c.amount;
+    if (l.leaveType==='late') {
+      if (mode === 'salary') { var exact=prAmount(line,'base')*l.minutes/(30*8*60); late+=Math.ceil(exact-Number.EPSILON*Math.max(1,exact)*4); }
+      else late+=(c.rounding==='ceil' ? Math.ceil(l.minutes/c.minutes) : Math.floor(l.minutes/c.minutes))*c.amount;
+    }
     else days+=l.days;
   });
-  return {late:round2(late),absence:round2(prAmount(line,'base')/c.divisor*days),days:days,ids:records.map(function(l) { return l._id; }),policy:Object.assign({},c),period:ym};
+  return {late:round2(late),absence:round2(prAmount(line,'base')/c.divisor*days),days:days,ids:records.map(function(l) { return l._id; }),policy:Object.assign({},c,{mode:mode,hoursPerDay:8,lateDivisor:30}),period:ym};
 }
 function prApplyAttendance() {
   if (fbReadOnly() || !prForm || !prReportCompanyOk(prForm.attendanceCompany)) return;
