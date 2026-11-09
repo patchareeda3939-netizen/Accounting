@@ -25,6 +25,7 @@ const L=require('./lib');
       const payrollButtons=document.querySelectorAll('[data-pr-report]').length;
       return [payrollButtons,PR_REPORTS.every(r=>{go('team','payrollReport-'+r[0]);return !!byId('prReportContent');})];
     }),[0,true]);
+    check('monthly team report ignores a different year selected in annual reports',await p.evaluate(()=>{pageState.prReportYear='2025';pageState.prReportYm='2026-01';go('team','payrollReport-monthly');const result=[prReportState.year,byId('prReportContent').textContent.includes('PR-JAN'),byId('prReportContent').textContent.includes('PR-NEXT')];delete pageState.prReportYear;delete pageState.prReportYm;return result;}),['2026',true,false]);
     check('attendance settings has its own team page',await p.evaluate(()=>{go('team','attendanceSettings');return byId('pageData').textContent.includes('แก้ไขการตั้งค่า');}),true);
     check('monthly reports follow payment month, include zero-tax employees and exclude voids',await p.evaluate(()=>prReportEntries('2026','2026-01').map(r=>[r.d.docNo,r.name,r.income,r.wht])),[['PR-JAN','พนักงานเอ',44500,800],['PR-JAN','พนักงานบี',15000,0]]);
     check('YTD includes resigned employees and sums actual paid-year taxable income, funds and net pay',await p.evaluate(()=>prYtdRows('2026').map(r=>[r.name,r.entries.length,r.income,r.taxable,r.deductions,r.sso,r.wht,r.pvd,r.net])),[['พนักงานบี',1,15000,15000,750,750,0,0,14250],['พนักงานเอ',2,89500,86500,7100,1750,1750,2100,82400]]);
