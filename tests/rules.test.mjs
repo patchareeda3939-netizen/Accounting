@@ -499,4 +499,21 @@ await expect('another company cannot read leave data', 'deny', () => getDoc(leav
 await expect('another company cannot write leave data', 'deny', () => setDoc(leaveRef(B), leaveData));
 await expect('anonymous cannot read leave data', 'deny', () => getDoc(leaveRef(anonClient)));
 
+S('R18', 'คำขอลาและสิทธิ์อนุมัติ');
+const reqRef=u=>doc(u.db,'companies/co1/leaves/request-test');
+const reqData={...leaveData,workflow:'request',requestedBy:E.uid,requestedAt:Date.now(),status:'pending'};
+await expect('editor submits own pending request','allow',()=>setDoc(reqRef(E),reqData));
+await expect('editor cannot approve own request','deny',()=>updateDoc(reqRef(E),{status:'approved',reviewedBy:E.uid}));
+await expect('editor cannot remove request workflow','deny',()=>updateDoc(reqRef(E),{workflow:'',status:'approved'}));
+await expect('owner cannot change request dates while reviewing','deny',()=>updateDoc(reqRef(A),{status:'approved',reviewedBy:A.uid,days:9}));
+await expect('owner cannot forge another approver','deny',()=>updateDoc(reqRef(A),{status:'approved',reviewedBy:E.uid}));
+await expect('another owner approves editor request','allow',()=>updateDoc(reqRef(A),{status:'approved',paid:'yes',reviewedBy:A.uid,reviewedAt:Date.now()}));
+await expect('approved request cannot be rewritten','deny',()=>updateDoc(reqRef(A),{status:'rejected'}));
+await expect('approved request cannot be deleted','deny',()=>deleteDoc(reqRef(A)));
+const selfReq=doc(A.db,'companies/co1/leaves/owner-request');
+await expect('owner submits own pending request','allow',()=>setDoc(selfReq,{...reqData,requestedBy:A.uid}));
+await expect('owner cannot approve own request','deny',()=>updateDoc(selfReq,{status:'approved',reviewedBy:A.uid}));
+await expect('requester withdraws pending request','allow',()=>updateDoc(selfReq,{status:'cancelled',cancelledAt:Date.now()}));
+await expect('viewer cannot submit request','deny',()=>setDoc(doc(V.db,'companies/co1/leaves/viewer-request'),{...reqData,requestedBy:V.uid}));
+await expect('request cannot start approved','deny',()=>setDoc(doc(A.db,'companies/co1/leaves/preapproved'),{...reqData,requestedBy:A.uid,status:'approved'}));
 process.exit(report() ? 1 : 0);
