@@ -205,6 +205,15 @@ function ocrDocNo(lines) {
     var found = lines[k].match(generic);
     if (found) return found[1];
   }
+  for (var a = 0; a < Math.min(lines.length, 12); a++) {
+    if (/Client\s*ID|ลูกค้า|ผู้ซื้อ|รายการ|description/i.test(lines[a])) break;
+    if (/Tax\s*ID|เลข.*ภาษี|สาขา|branch|Tel|ที่อยู่|address/i.test(lines[a])) continue;
+    var tokens = lines[a].match(/[A-Z0-9]{6,}(?:\s+[A-Z]\d{3,})?/ig) || [];
+    for (var b = 0; b < tokens.length; b++) {
+      var token = tokens[b].replace(/\s/g, '');
+      if (/^[A-Z]\d{6,}(?:[A-Z]\d+)?$/i.test(token) && (token.match(/\d/g) || []).length >= 8) return token;
+    }
+  }
   return '';
 }
 function parseReceiptText(text) {
@@ -225,19 +234,34 @@ function parseReceiptText(text) {
   for (var i = 0; i < lines.length && !j.date; i++) { var words = lines[i].split(' '); for (var k = 0; k < words.length; k++) { var dt = pdfDate(words.slice(k).join(' ')); if (dt) { j.date = dt.iso; break; } } }
   // Repair dotted thousands only inside complete money tokens.
   lines = lines.map(function(l) { return l.replace(/\b\d{1,3}(?:\.\d{3})+\.\d{2}\b/g, function(m) { return ocrNum(m).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }); });
+  // Thermal receipts often place VAT on the left and TOTAL/CASH on the right.
+  // Split labelled fields before selecting amounts so VAT Amt. cannot take TOTAL.
+  var moneyLines = [];
+  lines.forEach(function(l) {
+    if (/^(?:CASH|CHANGE|TENDERED|PAYMENT|เงินสด|เงินทอน|รับเงิน)\b/i.test(l)) { moneyLines.push(l); return; }
+    l.split(/(?=\bVAT\b|\b(?:GRAND\s+|NET\s+|SUB\s*)?TOTAL\b|\bCASH\b|\bCHANGE\b|\bW\/T\b)/i).forEach(function(part) {
+      if (part.trim()) moneyLines.push(part.trim());
+    });
+  });
   var paymentLine = /เงินสด|เงินทอน|รับเงิน|cash|change|tendered|payment/i;
-  // money lines
   var numsOf = function(l) { return (l.match(/\d[\d,]*\.\d{2}/g) || []).map(ocrNum).filter(function(n) { return !isNaN(n); }); };
-  var pick = function(re, isTotal) { var best = null; lines.forEach(function(l) { if (!paymentLine.test(l) && (!isTotal || !/sub\s*total|ก่อนภาษี/i.test(l)) && re.test(l)) { var ns = numsOf(l); if (ns.length) { var v = ns[ns.length - 1]; if (best == null || v > best) best = v; } } }); return best; };
+  var pick = function(re, isTotal) { var best = null; moneyLines.forEach(function(l) { if (!paymentLine.test(l) && (!isTotal || !/sub\s*total|ก่อนภาษี|total\s*disc/i.test(l)) && re.test(l)) { var ns = numsOf(l); if (ns.length) { var v = ns[ns.length - 1]; if (best == null || v > best) best = v; } } }); return best; };
   var total = pick(/รวมทั้งสิ้น|ยอดสุทธิ|จำนวนเงินรวม|ยอดรวมทั้งหมด|Grand\s*Total|Net\s*Total|Total\s*Amount|รวมเงินทั้งสิ้น|ยอดชำระ/i, true);
   if (total == null) total = pick(/ยอดรวม|(?:^|\s)TOTAL\b/i, true);
-  var vat = null; lines.forEach(function(l) { if (/ภาษีมูลค่าเพิ่ม|VAT/i.test(l) && !/รวม.*VAT|incl/i.test(l)) { var ns = numsOf(l).filter(function(n) { return n !== 7; }); if (ns.length) vat = ns[ns.length - 1]; } });
-  var sub = pick(/มูลค่าสินค้า|ก่อนภาษี|Sub\s*Total|รวมเงิน(?!ทั้งสิ้น)|Amount\s*before/i);
-  if (total == null) { var mx = 0; lines.forEach(function(l) { if (paymentLine.test(l) || /ภาษี|VAT|sub\s*total/i.test(l)) return; numsOf(l).forEach(function(n) { if (n > mx) mx = n; }); }); total = mx || 0; }
+  var vat = null;
+  moneyLines.forEach(function(l) {
+    if (/ภาษีมูลค่าเพิ่ม|\bVAT\b/i.test(l) && !/ก่อนภาษี|รวม.*VAT|incl|VAT\s*(?:Exc|Excl|Exclusive|Base)/i.test(l)) {
+      var ns = numsOf(l); if (ns.length) vat = ns[ns.length - 1];
+    }
+  });
+  var sub = pick(/มูลค่าสินค้า|ก่อนภาษี|Sub\s*Total|รวมเงิน(?!ทั้งสิ้น)|Amount\s*before|VAT\s*(?:Exc|Excl|Exclusive|Base)/i);
+  if (total == null && sub != null && vat != null) total = round2(sub + vat);
+  if (total == null) { var mx = 0; moneyLines.forEach(function(l) { if (paymentLine.test(l) || /ภาษี|VAT|sub\s*total|total\s*disc/i.test(l)) return; numsOf(l).forEach(function(n) { if (n > mx) mx = n; }); }); total = mx || 0; }
   j.total = total;
+  j.vat = vat == null ? 0 : vat;
   var incl = /รวม\s*(ภาษี|VAT)|VAT\s*incl|ราคารวมภาษี/i.test(all);
-  if (vat && total && Math.abs(vat - total * 7 / 107) < Math.max(1, total * 0.01)) { j.vatMode = incl ? 'inclusive' : 'exclusive'; }
-  else if (vat && sub && Math.abs(sub * 0.07 - vat) < 1) j.vatMode = 'exclusive';
+  if (vat > 0 && total && Math.abs(vat - total * 7 / 107) <= 0.05) { j.vatMode = incl ? 'inclusive' : 'exclusive'; }
+  else if (vat > 0 && sub && Math.abs(sub * 0.07 - vat) <= 0.05 && Math.abs(sub + vat - total) <= 0.05) j.vatMode = 'exclusive';
   // item lines: name  qty  unit price  amount
   lines.forEach(function(l) {
     if (/รวม|total|ภาษี|vat|ส่วนลด|discount|เงินทอน|change|cash|เงินสด/i.test(l)) return;

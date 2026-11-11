@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const ctx = vm.createContext({ companySettings: () => ({}), pdfDate: () => null, round2: n => Math.round(n * 100) / 100 });
+const ctx = vm.createContext({ companySettings: () => ({}), pdfDate: () => null, VAT_RATE: 0.07, round2: n => Math.round(n * 100) / 100 });
 vm.runInContext(fs.readFileSync('src/part17.js', 'utf8'), ctx);
 const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + text);
 (async () => {
@@ -19,6 +19,15 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   // Transcribed from the supplied True Money receipt; this is parser coverage,
   // not a claim that the OCR engine recognized the original photograph.
   const trueReceipt = 'บริษัท ทรู มันนี่ จำกัด\nTax ID : 0105546149531\nสาขา:000T0013 เซ็นทรัล ปิ่นเกล้า(2) สาขาที่:000051\nใบเสร็จรับเงิน/ใบกำกับภาษี\nB030300002A1729 0046550\n31/10/2026 02:26:11 PM\nClient ID: 0105553045044 (TUC)\nVAT Exc. 776.14 TOTAL DISC 0.00\nVAT Amt. 54.33 TOTAL 830.47\nW/T 23.28 CASH 807.19';
+  const parsedTrue = ctx.parseReceiptText(trueReceipt);
+  assert.equal(parsedTrue.vatMode, 'exclusive');
+  assert.equal(parsedTrue.subtotal, 776.14);
+  assert.equal(parsedTrue.vat, 54.33);
+  assert.equal(parsedTrue.total, 830.47);
+  const trueTotals = ctx.ocrTotals({items:[{qty:1,price:parsedTrue.subtotal}],vatMode:parsedTrue.vatMode});
+  assert.equal(trueTotals.subtotal, 776.14);
+  assert.equal(trueTotals.vat, 54.33);
+  assert.equal(trueTotals.total, 830.47);
   assert.equal(ctx.parseReceiptText(trueReceipt).docNo, 'B030300002A1729');
   assert.equal(ctx.parseReceiptText(trueReceipt.replace(' 0046550', '\n0046550')).docNo, 'B030300002A1729');
   assert.equal(parse('Invoice No.: INV-2026/101\nTOTAL 830.47').docNo, 'INV-2026/101');
@@ -27,6 +36,32 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   assert.equal(parse('เลขที่ 123456\nTOTAL 830.47').docNo, '123456');
   assert.equal(parse('Client ID: 0105553045044\nTax ID: 0105546149531\nสาขาที่:000051\nTOTAL 830.47').docNo, '');
   assert.equal(parse('ใบเสร็จรับเงิน/ใบกำกับภาษี\n31/10/2026 02:26:11 PM\nClient ID: 0105553045044').docNo, '');
+  assert.equal(ctx.parseReceiptText(trueReceipt.replace('ใบเสร็จรับเงิน/ใบกำกับภาษี', 'หัวเอกสารอ่านเพี้ยน')).docNo, 'B030300002A1729');
+  assert.equal(ctx.parseReceiptText(trueReceipt.replace('B030300002A1729', 'B030300002 A1729')).docNo, 'B030300002A1729');
+  assert.equal(parse('VAT Exc. 1000.00 TOTAL DISC 0.00\nVAT Amt. 70.00 TOTAL 1070.00').vat, 70);
+  assert.equal(parse('TOTAL DISC 100.00\nTOTAL 70.00\nVAT Amt. 0.00').total, 70);
+  assert.equal(parse('VAT 7% 7.00\nSubtotal 100.00\nTOTAL 107.00').vatMode, 'exclusive');
+  assert.equal(parse('VAT Amt. 54.33\nCASH 807.19').vatMode, 'none');
+  assert.equal(parse('ราคารวมภาษี\nVAT Amt. 54.33 TOTAL 830.47').vatMode, 'inclusive');
+  // Exercise the actual upload-to-form mapping with OCR output supplied by a stub.
+  const realFileToImages = ctx.fileToImages;
+  ctx.fileToImages = async () => ({images:[{}],pageTexts:[],text:''});
+  ctx.tessRead = async () => trueReceipt;
+  ctx.byId = () => ({value:'tess'});
+  ctx.URL = {createObjectURL: () => 'blob:test'};
+  ctx.todayStr = () => '2026-11-11';
+  ctx.ocrGuessAccount = () => '';
+  ctx.refreshPageData = () => {};
+  await ctx.ocrAddFiles([{name:'receipt.jpg'}]);
+  for (let tick = 0; tick < 20 && !ctx.ocr.items[0].data && !ctx.ocr.items[0].err; tick++) await new Promise(setImmediate);
+  assert.equal(ctx.ocr.items[0].err, '');
+  const form = ctx.ocr.items[0].data;
+  assert.equal(form.docNo, 'B030300002A1729');
+  assert.equal(form.vatMode, 'exclusive');
+  assert.equal(form.items[0].price, 776.14);
+  assert.equal(ctx.ocrTotals(form).vat, 54.33);
+  assert.equal(ctx.ocrTotals(form).total, 830.47);
+  ctx.fileToImages = realFileToImages;
   const fragment = (str,y,hasEOL=false) => ({str,transform:[1,0,0,1,0,y],hasEOL});
   assert.equal(ctx.ocrPdfText([fragment('ร้าน',100,true),fragment('TOTAL',80),fragment('1,070.00',80),fragment('Cash',60),fragment('2,000.00',60)]), 'ร้าน\nTOTAL 1,070.00\nCash 2,000.00');
   const original = {type:'image/png',name:'large.png'};
