@@ -7229,24 +7229,57 @@ function bindOcr() {
   c.querySelectorAll('[data-ocrsave]').forEach(function(b) { b.onclick = function() { ocrCreate(Number(b.dataset.ocrsave), b); }; });
   c.querySelectorAll('[data-ocropen]').forEach(function(b) { b.onclick = function() { openDocDetail(ocr.items[Number(b.dataset.ocropen)].docId); }; });
 }
+// PDF.js emits positioned fragments, not necessarily one item per line.
+function ocrPdfText(items) {
+  var lines = [], line = [], y = null;
+  function flush() { if (line.length) lines.push(line.join(' ')); line = []; }
+  items.forEach(function(x) {
+    if (typeof x.str !== 'string') return;
+    var nextY = x.transform && x.transform[5];
+    if (line.length && y != null && nextY != null && Math.abs(nextY - y) > 2) flush();
+    if (x.str) line.push(x.str);
+    y = nextY;
+    if (x.hasEOL) flush();
+  });
+  flush();
+  return lines.join('\n');
+}
+function ocrCanvasBlob(canvas) {
+  return new Promise(function(resolve, reject) {
+    canvas.toBlob(function(blob) { if (blob) resolve(blob); else reject(new Error('แปลงรูปไม่สำเร็จ')); }, 'image/png');
+  });
+}
 async function fileToImages(f) {
-  var out = [], text = '';
+  var out = [], texts = [];
   if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
     var lib = await loadPdfJs(), pdf = await lib.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
-    for (var p = 1; p <= Math.min(pdf.numPages, 3); p++) {
-      var page = await pdf.getPage(p), vp = page.getViewport({ scale: 2 }), cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
-      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
-      out.push(await new Promise(function(r) { cv.toBlob(r, 'image/jpeg', 0.85); }));
-      try { text += (await page.getTextContent()).items.map(function(x) { return x.str; }).join(' ') + '\n'; } catch (e) {}
-    }
+    try {
+      for (var p = 1; p <= pdf.numPages; p++) {
+        var page = await pdf.getPage(p);
+        try {
+          var vp = page.getViewport({ scale: 2 }), cv = document.createElement('canvas');
+          cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+          await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+          out.push(await ocrCanvasBlob(cv));
+          try { texts.push(ocrPdfText((await page.getTextContent()).items)); } catch (e) { texts.push(''); }
+          cv.width = cv.height = 0;
+        } finally { page.cleanup(); }
+      }
+    } finally { await pdf.destroy(); }
   } else {
-    var url = URL.createObjectURL(f), img = new Image();
-    await new Promise(function(res, rej) { img.onload = res; img.onerror = function() { rej(new Error('เปิดรูปไม่ได้ (ลองแปลงเป็น JPG)')); }; img.src = url; });
-    var sc = Math.min(1, 2000 / Math.max(img.width, img.height)), cv2 = document.createElement('canvas'); cv2.width = Math.round(img.width * sc); cv2.height = Math.round(img.height * sc);
-    cv2.getContext('2d').drawImage(img, 0, 0, cv2.width, cv2.height); URL.revokeObjectURL(url);
-    out.push(await new Promise(function(r) { cv2.toBlob(r, 'image/jpeg', 0.85); }));
+    // Send the original pixels to OCR; a preview must not reduce OCR resolution.
+    out.push(f); texts.push('');
   }
-  return { images: out, text: text.trim() };
+  return { images: out, pageTexts: texts, text: texts.join('\n\n').trim() };
+}
+async function ocrReadText(r, progress) {
+  var texts = [];
+  for (var i = 0; i < r.images.length; i++) {
+    var text = (r.pageTexts || [])[i] || '';
+    if (text.replace(/\s/g, '').length < 10) text = await tessRead([r.images[i]], progress);
+    texts.push(text);
+  }
+  return texts.join('\n\n');
 }
 var OCR_PROMPT = 'คุณคือผู้ช่วยบัญชีไทย อ่านเอกสารซื้อ (ใบเสร็จ ใบกำกับภาษี บิล) จากรูป แล้วตอบเป็น JSON อย่างเดียว ไม่มีข้อความอื่น รูปแบบ:\n' +
   '{"vendorName":"ชื่อผู้ขาย/ร้าน","vendorTaxId":"เลขผู้เสียภาษี 13 หลักของผู้ขาย (ตัวเลขล้วน) หรือ \\"\\"","vendorAddress":"","vendorBranch":"เช่น สำนักงานใหญ่ หรือ สาขาที่ 00001","docNo":"เลขที่ใบกำกับ/ใบเสร็จ","date":"YYYY-MM-DD (แปลง พ.ศ. เป็น ค.ศ.)","dueDate":"YYYY-MM-DD หรือ \\"\\"",' +
@@ -7268,10 +7301,9 @@ async function ocrAddFiles(files) {
           catch (ce) { if (engine === 'claude') throw ce; it.status = 'Claude อ่านไม่ได้ (' + (ce.message || ce) + ') กำลังใช้ Tesseract…'; refreshPageData(); }
         }
         if (!j) {
-          var text = r.text && r.text.replace(/\s/g, '').length > 40 ? r.text : '';
-          if (!text) text = await tessRead(r.images, function(pct) { it.status = 'Tesseract กำลังอ่าน… ' + pct + '%'; refreshPageData(); });
-          text = normThaiOcr(text); it.rawText = text;
-          j = parseReceiptText(text); via = r.text && text === r.text ? 'ข้อความใน PDF' : 'Tesseract';
+          var text = await ocrReadText(r, function(pct) { it.status = 'Tesseract กำลังอ่าน… ' + pct + '%'; refreshPageData(); });
+          var nativeText = text === r.text; text = normThaiOcr(text); it.rawText = text;
+          j = parseReceiptText(text); via = nativeText ? 'ข้อความใน PDF' : 'Tesseract';
         }
         var items = Array.isArray(j.items) && j.items.length ? j.items.map(function(x) { return { name: String(x.name || ''), qty: Number(x.qty) || 1, price: Number(x.price) || 0 }; }) : [{ name: j.category || 'ค่าใช้จ่ายตามเอกสาร', qty: 1, price: Number(j.subtotal || j.total) || 0 }];
         var acc = ocrGuessAccount(j.category, j.vendorName, items);
@@ -7288,8 +7320,11 @@ async function ocrByClaude(r) {
   var lim = null; try { lim = await s.limits(); } catch (e) {}
   var canImg = !lim || lim.images;
   if (!canImg && !r.text) throw new Error('ส่งรูปให้ Claude ไม่ได้');
-  var prompt = OCR_PROMPT + (r.text ? '\n\nข้อความที่ดึงได้จาก PDF (ใช้ช่วยอ่าน):\n' + r.text.slice(0, 6000) : '');
-  return await s.json(prompt, Object.assign({ modelTier: 'default' }, canImg ? { images: r.images.slice(0, (lim && lim.images && lim.images.maxCount) || 3) } : {}));
+  // If image limits exclude pages, supply their complete text instead.
+  var maxImages = canImg ? ((lim && lim.images && lim.images.maxCount) || r.images.length) : 0;
+  var fullText = r.images.length > maxImages ? await ocrReadText(r) : r.text;
+  var prompt = OCR_PROMPT + (fullText ? '\n\nข้อความจากเอกสารทุกหน้า (ใช้ช่วยอ่าน):\n' + fullText : '');
+  return await s.json(prompt, Object.assign({ modelTier: 'default' }, canImg ? { images: r.images.slice(0, maxImages) } : {}));
 }
 /* ---- Tesseract.js (runs in the browser, Thai + English) ---- */
 var TESS_CDN = 'https://cdn.jsdelivr.net/npm/', _tessWorker = null;
@@ -7315,7 +7350,7 @@ async function tessRead(images, progress) {
   return t;
 }
 /* ---- turn raw OCR text into document fields ---- */
-function ocrNum(s) { var n = Number(String(s).replace(/[,\s฿]/g, '').replace(/[oO]/g, '0')); return isFinite(n) ? n : NaN; }
+function ocrNum(s) { var value = String(s).replace(/[,\s฿]/g, '').replace(/[oO]/g, '0'); if (/^\d{1,3}(?:\.\d{3})+\.\d{2}$/.test(value)) { var dot = value.lastIndexOf('.'); value = value.slice(0, dot).replace(/\./g, '') + value.slice(dot); } var n = Number(value); return isFinite(n) ? n : NaN; }
 function normThaiOcr(t) {
   return String(t || '').replace(/\u0e4d\u0e32/g, '\u0e33').replace(/\u0e32\u0e4d/g, '\u0e33').replace(/[๐-๙]/g, function(c) { return String(c.charCodeAt(0) - 0x0e50); }).replace(/น้ามัน/g, 'น้ำมัน').replace(/จ[ํ]?ากัด/g, 'จำกัด');
 }
@@ -7336,13 +7371,17 @@ function parseReceiptText(text) {
   j.docNo = dn ? dn[1] : '';
   // date
   for (var i = 0; i < lines.length && !j.date; i++) { var words = lines[i].split(' '); for (var k = 0; k < words.length; k++) { var dt = pdfDate(words.slice(k).join(' ')); if (dt) { j.date = dt.iso; break; } } }
+  // Repair dotted thousands only inside complete money tokens.
+  lines = lines.map(function(l) { return l.replace(/\b\d{1,3}(?:\.\d{3})+\.\d{2}\b/g, function(m) { return ocrNum(m).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }); });
+  var paymentLine = /เงินสด|เงินทอน|รับเงิน|cash|change|tendered|payment/i;
   // money lines
-  var numsOf = function(l) { return (l.match(/\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2}/g) || []).map(ocrNum).filter(function(n) { return !isNaN(n); }); };
-  var pick = function(re) { var best = null; lines.forEach(function(l) { if (re.test(l)) { var ns = numsOf(l); if (ns.length) { var v = ns[ns.length - 1]; if (best == null || v > best) best = v; } } }); return best; };
-  var total = pick(/รวมทั้งสิ้น|ยอดสุทธิ|จำนวนเงินรวม|ยอดรวมทั้งหมด|Grand\s*Total|Net\s*Total|Total\s*Amount|รวมเงินทั้งสิ้น|ยอดชำระ|TOTAL/i);
+  var numsOf = function(l) { return (l.match(/\d[\d,]*\.\d{2}/g) || []).map(ocrNum).filter(function(n) { return !isNaN(n); }); };
+  var pick = function(re, isTotal) { var best = null; lines.forEach(function(l) { if (!paymentLine.test(l) && (!isTotal || !/sub\s*total|ก่อนภาษี/i.test(l)) && re.test(l)) { var ns = numsOf(l); if (ns.length) { var v = ns[ns.length - 1]; if (best == null || v > best) best = v; } } }); return best; };
+  var total = pick(/รวมทั้งสิ้น|ยอดสุทธิ|จำนวนเงินรวม|ยอดรวมทั้งหมด|Grand\s*Total|Net\s*Total|Total\s*Amount|รวมเงินทั้งสิ้น|ยอดชำระ/i, true);
+  if (total == null) total = pick(/ยอดรวม|(?:^|\s)TOTAL\b/i, true);
   var vat = null; lines.forEach(function(l) { if (/ภาษีมูลค่าเพิ่ม|VAT/i.test(l) && !/รวม.*VAT|incl/i.test(l)) { var ns = numsOf(l).filter(function(n) { return n !== 7; }); if (ns.length) vat = ns[ns.length - 1]; } });
   var sub = pick(/มูลค่าสินค้า|ก่อนภาษี|Sub\s*Total|รวมเงิน(?!ทั้งสิ้น)|Amount\s*before/i);
-  if (total == null) { var mx = 0; lines.forEach(function(l) { numsOf(l).forEach(function(n) { if (n > mx) mx = n; }); }); total = mx || 0; }
+  if (total == null) { var mx = 0; lines.forEach(function(l) { if (paymentLine.test(l) || /ภาษี|VAT|sub\s*total/i.test(l)) return; numsOf(l).forEach(function(n) { if (n > mx) mx = n; }); }); total = mx || 0; }
   j.total = total;
   var incl = /รวม\s*(ภาษี|VAT)|VAT\s*incl|ราคารวมภาษี/i.test(all);
   if (vat && total && Math.abs(vat - total * 7 / 107) < Math.max(1, total * 0.01)) { j.vatMode = incl ? 'inclusive' : 'exclusive'; }
