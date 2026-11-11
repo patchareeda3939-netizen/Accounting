@@ -7330,10 +7330,10 @@ var TESS_CDN = 'https://cdn.jsdelivr.net/npm/', _tessWorker = null;
 async function tessWorker(progress) {
   if (_tessWorker) return _tessWorker;
   await loadScriptOnce(TESS_CDN + 'tesseract.js@5.1.1/dist/tesseract.min.js', function() { return !!window.Tesseract; });
-  _tessWorker = window.Tesseract.createWorker('tha', 1, {
+  _tessWorker = window.Tesseract.createWorker('tha+eng', 1, {
     workerPath: TESS_CDN + 'tesseract.js@5.1.1/dist/worker.min.js',
     corePath: TESS_CDN + 'tesseract.js-core@5.1.1',
-    langPath: TESS_CDN + '@tesseract.js-data/tha@1.0.0/4.0.0_best_int',
+    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
     logger: function(m) { if (progress && m && m.status === 'recognizing text') progress(Math.round((m.progress || 0) * 100)); }
   });
   try { return await _tessWorker; } catch (e) { _tessWorker = null; throw new Error('โหลดตัวอ่าน Tesseract ไม่สำเร็จ'); }
@@ -7353,6 +7353,30 @@ function ocrNum(s) { var value = String(s).replace(/[,\s฿]/g, '').replace(/[oO
 function normThaiOcr(t) {
   return String(t || '').replace(/\u0e4d\u0e32/g, '\u0e33').replace(/\u0e32\u0e4d/g, '\u0e33').replace(/[๐-๙]/g, function(c) { return String(c.charCodeAt(0) - 0x0e50); }).replace(/น้ามัน/g, 'น้ำมัน').replace(/จ[ํ]?ากัด/g, 'จำกัด');
 }
+// Prefer document labels, then an unlabelled identifier directly below the title.
+// Branch, register, customer and telephone numbers are not invoice identifiers.
+function ocrDocNo(lines) {
+  var id = '([A-Z0-9][A-Z0-9\\/.-]{2,})';
+  var labelled = new RegExp('(?:Invoice|Receipt|Doc(?:ument)?)\\s*(?:Number|No\\.?|#)\\s*[:#：]?\\s*' + id + '|(?:เลขที่ใบกำกับ(?:ภาษี)?|เลขที่ใบเสร็จ|เลขที่เอกสาร|เล่มที่/เลขที่)\\s*[:#：]?\\s*' + id, 'i');
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].match(labelled);
+    if (m) return m[1] || m[2];
+  }
+  for (var h = 0; h < lines.length; h++) {
+    if (!/ใบกำกับภาษี|ใบเสร็จรับเงิน|tax\s*invoice|receipt/i.test(lines[h])) continue;
+    for (var n = h + 1; n <= h + 2 && n < lines.length; n++) {
+      var candidate = lines[n].match(/^([A-Z0-9][A-Z0-9/-]{5,})(?:\s+\d{3,})?$/i);
+      if (candidate && /\d/.test(candidate[1]) && (/[A-Z]/i.test(candidate[1]) || /^\d{8,}$/.test(candidate[1]))) return candidate[1];
+    }
+  }
+  var generic = new RegExp('(?:^|\\s)(?:เลขที่|No\\.?)\\s*[:#：]?\\s*' + id + '(?=\\s|$)', 'i');
+  for (var k = 0; k < lines.length; k++) {
+    if (/Tax\s*ID|Client\s*ID|สาขา|branch|Tel\s*:/i.test(lines[k])) continue;
+    var found = lines[k].match(generic);
+    if (found) return found[1];
+  }
+  return '';
+}
 function parseReceiptText(text) {
   text = normThaiOcr(text);
   var lines = text.split(/\r?\n/).map(function(l) { return l.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
@@ -7366,8 +7390,7 @@ function parseReceiptText(text) {
   j.vendorName = vn.replace(/^(ชื่อ|ผู้ขาย|Seller)\s*[:：]?\s*/i, '').replace(/\s*(เลขประจำตัว|Tax ?ID).*$/i, '').slice(0, 120);
   var br = all.match(/(สำนักงานใหญ่|สาขา(?:ที่)?\s*\d{3,5})/); j.vendorBranch = br ? br[1] : '';
   // document number
-  var dn = all.match(/(?:ใบกำกับภาษี\s*)?(?:เลขที่|เล่มที่\/เลขที่|No\.?|Invoice\s*No\.?|Receipt\s*No\.?|Doc(?:ument)?\s*No\.?)\s*[:#：]?\s*[@©®]?\s*([A-Z0-9][A-Z0-9\-\/\.]{2,})/i);
-  j.docNo = dn ? dn[1] : '';
+  j.docNo = ocrDocNo(lines);
   // date
   for (var i = 0; i < lines.length && !j.date; i++) { var words = lines[i].split(' '); for (var k = 0; k < words.length; k++) { var dt = pdfDate(words.slice(k).join(' ')); if (dt) { j.date = dt.iso; break; } } }
   // Repair dotted thousands only inside complete money tokens.

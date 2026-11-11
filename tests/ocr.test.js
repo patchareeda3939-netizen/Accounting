@@ -16,6 +16,17 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   const receipt = parse('สินค้า 1 1.000.00 1.000.00\nSubtotal 1.000.00\nVAT 7% 70.00\nGrand Total 1.070.00\nCash 2000.00');
   assert.equal(receipt.items[0].price, 1000);
   assert.equal(receipt.vatMode, 'exclusive');
+  // Transcribed from the supplied True Money receipt; this is parser coverage,
+  // not a claim that the OCR engine recognized the original photograph.
+  const trueReceipt = 'บริษัท ทรู มันนี่ จำกัด\nTax ID : 0105546149531\nสาขา:000T0013 เซ็นทรัล ปิ่นเกล้า(2) สาขาที่:000051\nใบเสร็จรับเงิน/ใบกำกับภาษี\nB030300002A1729 0046550\n31/10/2026 02:26:11 PM\nClient ID: 0105553045044 (TUC)\nVAT Exc. 776.14 TOTAL DISC 0.00\nVAT Amt. 54.33 TOTAL 830.47\nW/T 23.28 CASH 807.19';
+  assert.equal(ctx.parseReceiptText(trueReceipt).docNo, 'B030300002A1729');
+  assert.equal(ctx.parseReceiptText(trueReceipt.replace(' 0046550', '\n0046550')).docNo, 'B030300002A1729');
+  assert.equal(parse('Invoice No.: INV-2026/101\nTOTAL 830.47').docNo, 'INV-2026/101');
+  assert.equal(parse('Invoice Number: INV-123456').docNo, 'INV-123456');
+  assert.equal(parse('เลขที่ใบกำกับภาษี: TX-123456\nTOTAL 830.47').docNo, 'TX-123456');
+  assert.equal(parse('เลขที่ 123456\nTOTAL 830.47').docNo, '123456');
+  assert.equal(parse('Client ID: 0105553045044\nTax ID: 0105546149531\nสาขาที่:000051\nTOTAL 830.47').docNo, '');
+  assert.equal(parse('ใบเสร็จรับเงิน/ใบกำกับภาษี\n31/10/2026 02:26:11 PM\nClient ID: 0105553045044').docNo, '');
   const fragment = (str,y,hasEOL=false) => ({str,transform:[1,0,0,1,0,y],hasEOL});
   assert.equal(ctx.ocrPdfText([fragment('ร้าน',100,true),fragment('TOTAL',80),fragment('1,070.00',80),fragment('Cash',60),fragment('2,000.00',60)]), 'ร้าน\nTOTAL 1,070.00\nCash 2,000.00');
   const original = {type:'image/png',name:'large.png'};
