@@ -7171,8 +7171,7 @@ function dimSelectsHTML(ex) {
 }
 
 /* ================= Document reading (OCR via Claude) — accounting:receiptCapture ================= */
-var OCR_UI_VERSION = '2026.11.12.4';
-var OCR_RD_SEARCH_URL = 'https://vsreg.rd.go.th/VATINFOWSWeb/jsp/administrator/vatservice.jsp';
+var OCR_UI_VERSION = '2026.11.12.5';
 var ocr = { items: [], busy: false };
 function ocrEngine() { try { return localStorage.getItem('psm_ocr') || 'tess'; } catch (e) { return 'tess'; } }
 var SAMPLE = null;
@@ -7216,6 +7215,10 @@ function ocrBranchNo(value) {
   if (/สำนักงานใหญ่/.test(text)) return '00000';
   var m = text.match(/^(?:สาขา(?:ที่)?\s*[:：]?\s*)?(\d{1,5})$/);
   return m ? m[1].padStart(5, '0') : '';
+}
+function ocrBranchInput(d) {
+  var value = String(d.vendorBranch || '').trim();
+  return /^(สำนักงานใหญ่|สาขา(?:ที่)?\s*[:：]?\s*\d{5})$/.test(value) ? ocrBranchNo(value) : value;
 }
 function ocrVendorEntity(d) { return d.vendorEntity === 'person' ? 'person' : 'company'; }
 function ocrVendorMatch(d) {
@@ -7267,10 +7270,10 @@ function ocrApplyRdResult(it, rows, tax, branch) {
 }
 async function ocrLookupVendor(i, btn) {
   var it = ocr.items[i]; if (!it || !it.data || it.docId || it.vendorBusy) return;
-  var d = it.data, tax = ocrTaxId(d.vendorTaxId), branchText = String(d.vendorBranch || '').trim(), branch = ocrBranchNo(branchText), entity = ocrVendorEntity(d);
+  var d = it.data, tax = ocrTaxId(d.vendorTaxId), branchText = ocrBranchInput(d), branch = /^\d{5}$/.test(branchText) ? branchText : '', entity = ocrVendorEntity(d);
   if (!/^\d{13}$/.test(tax)) throw new Error('ใส่เลขผู้เสียภาษี 13 หลักก่อนค้นหา');
-  if (entity === 'company' && !branch) throw new Error('กรอกสาขาก่อนค้นหา เช่น 00056 หรือสำนักงานใหญ่ (00000)');
-  if (branchText && !branch) throw new Error('รูปแบบสาขาไม่ถูกต้อง เช่น 00056 หรือสำนักงานใหญ่ (00000)');
+  if (entity === 'company' && !branch) throw new Error('กรอกสาขาเป็นตัวเลข 5 หลักก่อนค้นหา เช่น 00056 หรือ 00000 สำหรับสำนักงานใหญ่');
+  if (branchText && !branch) throw new Error('สาขาต้องเป็นตัวเลข 5 หลักพอดี เช่น 00056 หรือ 00000');
   btn.disabled = true; it.vendorBusy = true; it.vendorLookup = 'กำลังค้นข้อมูลจากกรมสรรพากร…'; refreshPageData();
   var controller = new AbortController(), timer = setTimeout(function() { controller.abort(); }, 20000);
   try {
@@ -7279,7 +7282,7 @@ async function ocrLookupVendor(i, btn) {
     if (!res.ok) throw new Error('กรมสรรพากรตอบกลับ ' + res.status);
     var rows = await res.json();
     if (!Array.isArray(rows)) throw new Error('รูปแบบผลค้นหาจากกรมสรรพากรไม่ถูกต้อง');
-    if (ocrTaxId(d.vendorTaxId) !== tax || String(d.vendorBranch || '').trim() !== branchText || ocrVendorEntity(d) !== entity || it.docId) { it.vendorLookup = 'ข้อมูลผู้ขายเปลี่ยนระหว่างค้นหา กรุณาค้นใหม่'; return; }
+    if (ocrTaxId(d.vendorTaxId) !== tax || ocrBranchInput(d) !== branchText || ocrVendorEntity(d) !== entity || it.docId) { it.vendorLookup = 'ข้อมูลผู้ขายเปลี่ยนระหว่างค้นหา กรุณาค้นใหม่'; return; }
     var matches = rows.filter(function(r) { return r.nid === tax && !r.closeDate && ocrBranchNo(r.branchNo); });
     if (branch) ocrApplyRdResult(it, matches, tax, branch);
     else if (matches.length === 1) ocrApplyRdResult(it, matches, tax, ocrBranchNo(matches[0].branchNo));
@@ -7290,16 +7293,25 @@ async function ocrLookupVendor(i, btn) {
       it.vendorLookup = 'เติมชื่อแล้ว พบหลายสถานประกอบการ จึงไม่ได้เลือกที่อยู่ให้ กรุณาตรวจสอบที่อยู่ก่อนบันทึก';
     } else throw new Error('ไม่พบข้อมูล VAT ในการค้นครั้งนี้ บุคคลธรรมดาที่ไม่จด VAT อาจไม่มีข้อมูลในบริการนี้');
   } catch (e) {
-    it.vendorLookup = 'ค้นกรมสรรพากรไม่สำเร็จ: ' + (e.name === 'AbortError' ? 'หมดเวลารอ' : e.message) + ' · เปิดเว็บตรวจสอบ VAT ด้านล่างเพื่อตรวจสอบต่อได้';
+    it.vendorLookup = 'ค้นกรมสรรพากรไม่สำเร็จ: ' + (e.name === 'AbortError' ? 'หมดเวลารอ' : e.message) + ' · ตรวจสอบเลขผู้เสียภาษีและสาขา แล้วลองค้นใหม่';
     throw new Error(it.vendorLookup);
   } finally { clearTimeout(timer); it.vendorBusy = false; btn.disabled = false; refreshPageData(); }
 }
+function ocrVendorOption(c) { return c.name + ' · ' + (c.taxId || '') + ' · ' + (c.branch || 'ไม่ระบุสาขา'); }
+function ocrVendorNameChanged(i, value) {
+  var it = ocr.items[i]; if (!it || !it.data || it.docId) return;
+  var vendors = STORE.contacts.filter(function(c) { return c.kind !== 'customer'; });
+  var exact = vendors.find(function(c) { return ocrVendorOption(c) === value; });
+  var names = vendors.filter(function(c) { return c.name === value; });
+  var match = exact || (names.length === 1 ? names[0] : null);
+  if (match) ocrUseVendor(i, match._id);
+  else it.data.vendorName = value;
+}
 function ocrVendorFields(d, it, i, v) {
-  return '<div class="field"><label>เลือกผู้ขายจากรายชื่อ</label><select data-ocrvendor="' + i + '"><option value="">— เลือกรายชื่อเดิม —</option>' + STORE.contacts.filter(function(c) { return c.kind !== 'customer'; }).map(function(c) { return '<option value="' + esc(c._id) + '">' + esc(c.name + ' · ' + (c.taxId || '') + ' · ' + (c.branch || 'ไม่ระบุสาขา')) + '</option>'; }).join('') + '</select></div>' +
-    '<div class="field"><label>ประเภทผู้ขาย</label><select data-ocr="' + i + ':vendorEntity"><option value="company"' + (ocrVendorEntity(d) === 'company' ? ' selected' : '') + '>นิติบุคคล (ต้องระบุสาขาเมื่อค้นหา)</option><option value="person"' + (ocrVendorEntity(d) === 'person' ? ' selected' : '') + '>บุคคลธรรมดา (ไม่บังคับสาขา)</option></select></div>' +
-    '<div class="field"><label>ผู้ขาย</label>' + v('vendorName', d.vendorName) + '</div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
-    '<div class="field"><label>สาขาผู้ขาย</label>' + v('vendorBranch', d.vendorBranch) + '</div><div class="field"><label>ที่อยู่ผู้ขาย</label>' + v('vendorAddress', d.vendorAddress) + '</div>' +
-    '<div class="field"><div><a class="btn btn-outline" href="' + OCR_RD_SEARCH_URL + '" target="_blank" rel="noopener noreferrer">ค้น VAT ที่เว็บกรมสรรพากร</a> <button type="button" class="btn btn-outline" data-ocrrd="' + i + '"' + (it.vendorBusy ? ' disabled' : '') + '>ค้นชื่อ/ที่อยู่จาก Tax ID</button> <button type="button" class="btn btn-outline" data-ocrvendoradd="' + i + '">+ เพิ่มรายชื่อผู้ขาย</button></div><span class="small muted">ค้นด้วยเลขผู้เสียภาษี 13 หลัก · นิติบุคคลต้องกรอกสาขา เช่น 00056 หรือสำนักงานใหญ่ (00000) · บุคคลธรรมดาไม่บังคับสาขา · ดึงอัตโนมัติผ่าน eservice กรมสรรพากร</span>' + (it.vendorLookup ? '<span class="small muted">' + esc(it.vendorLookup) + '</span>' : '') + '</div>';
+  return '<div class="field"><label>ประเภทผู้ขาย</label><select data-ocr="' + i + ':vendorEntity"><option value="company"' + (ocrVendorEntity(d) === 'company' ? ' selected' : '') + '>นิติบุคคล (ต้องระบุสาขาเมื่อค้นหา)</option><option value="person"' + (ocrVendorEntity(d) === 'person' ? ' selected' : '') + '>บุคคลธรรมดา (ไม่บังคับสาขา)</option></select></div>' +
+    '<div class="field"><label for="ocrVendorName-' + i + '">ผู้ขาย</label><input id="ocrVendorName-' + i + '" list="ocrVendorList-' + i + '" data-ocr="' + i + ':vendorName" data-ocrvendor="' + i + '" value="' + esc(d.vendorName || '') + '" placeholder="เลือกผู้ขายเดิม หรือพิมพ์ชื่อใหม่" autocomplete="off"><datalist id="ocrVendorList-' + i + '">' + STORE.contacts.filter(function(c) { return c.kind !== 'customer'; }).map(function(c) { return '<option value="' + esc(ocrVendorOption(c)) + '"></option>'; }).join('') + '</datalist></div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
+    '<div class="field"><label for="ocrVendorBranch-' + i + '">สาขาผู้ขาย (5 หลัก)</label><input id="ocrVendorBranch-' + i + '" data-ocr="' + i + ':vendorBranch" value="' + esc(ocrBranchInput(d)) + '" inputmode="numeric" pattern="[0-9]{5}" minlength="5" maxlength="5" placeholder="00000 = สำนักงานใหญ่"' + (ocrVendorEntity(d) === 'company' ? ' required' : '') + '></div><div class="field"><label>ที่อยู่ผู้ขาย</label>' + v('vendorAddress', d.vendorAddress) + '</div>' +
+    '<div class="field"><div><button type="button" class="btn btn-outline" data-ocrrd="' + i + '"' + (it.vendorBusy ? ' disabled' : '') + '>ค้นชื่อ/ที่อยู่จาก Tax ID</button> <button type="button" class="btn btn-outline" data-ocrvendoradd="' + i + '">+ เพิ่มรายชื่อผู้ขาย</button></div><span class="small muted">ค้นด้วยเลขผู้เสียภาษี 13 หลัก · นิติบุคคลต้องกรอกสาขา 5 หลัก เช่น 00056 หรือ 00000 (สำนักงานใหญ่) · บุคคลธรรมดาไม่บังคับสาขา · ดึงอัตโนมัติผ่าน eservice กรมสรรพากร</span>' + (it.vendorLookup ? '<span class="small muted">' + esc(it.vendorLookup) + '</span>' : '') + '</div>';
 }
 function ocrData() {
   if (!ocr.items.length) return '<p class="empty-hint">ยังไม่มีเอกสารที่อ่าน</p>';
@@ -7343,7 +7355,8 @@ function bindOcr() {
   }
   var c = byId('pageData'); if (!c) return;
   c.querySelectorAll('[data-ocr]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocr.split(':'), it = ocr.items[Number(s[0])]; it.data[s[1]] = el.value; if (/^(kind|vatMode|whtRate|vendorEntity)$/.test(s[1])) { el.onchange = null; refreshPageData(); } }; });
-  c.querySelectorAll('[data-ocrvendor]').forEach(function(el) { el.onchange = function() { ocrUseVendor(Number(el.dataset.ocrvendor), el.value); }; });
+  c.querySelectorAll('[data-ocrvendor]').forEach(function(el) { el.onchange = function changeVendor() { el.onchange = null; ocrVendorNameChanged(Number(el.dataset.ocrvendor), el.value); if (document.contains(el)) el.onchange = changeVendor; }; });
+  c.querySelectorAll('[data-ocr$=":vendorBranch"]').forEach(function(el) { el.oninput = function() { el.value = el.value.replace(/\D/g, '').slice(0, 5); var i = Number(el.dataset.ocr.split(':')[0]); ocr.items[i].data.vendorBranch = el.value; el.setCustomValidity(el.value && el.value.length !== 5 ? 'กรอกสาขาเป็นตัวเลข 5 หลักพอดี' : ''); }; });
   [['data-ocrrd','ocrrd',ocrLookupVendor], ['data-ocrvendoradd','ocrvendoradd',ocrSaveVendor]].forEach(function(action) {
     c.querySelectorAll('[' + action[0] + ']').forEach(function(b) { b.onclick = async function() { try { await action[2](Number(b.dataset[action[1]]), b); } catch (e) { showToast(e.message); } }; });
   });

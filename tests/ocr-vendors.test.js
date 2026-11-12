@@ -30,6 +30,10 @@ const receipt=name+'\nเลขที่ประจำตัวผู้เส�
   assert.equal(requests,0,'blank branch must not send a request');
   ctx.ocr.items[0].data.vendorBranch='invalid';
   await assert.rejects(ctx.ocrLookupVendor(0,btn),/กรอกสาขา/);assert.equal(requests,0);
+  for (const invalid of ['56','0056','000056','12a56']) {
+    ctx.ocr.items[0].data.vendorBranch=invalid;
+    await assert.rejects(ctx.ocrLookupVendor(0,btn),/5 หลัก/);assert.equal(requests,0);
+  }
   ctx.ocr.items[0].data.vendorBranch='00056';await ctx.ocrLookupVendor(0,btn);
   assert.equal(ctx.ocr.items[0].data.vendorBranch,'สาขาที่ 00056');
   ctx.ocr.items[0].data.vendorBranch='00000';await ctx.ocrLookupVendor(0,btn);
