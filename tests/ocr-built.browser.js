@@ -18,11 +18,11 @@ const assert=require('node:assert/strict');
    });
    for(const viewport of [{width:1534,height:959},{width:390,height:844}]){
     await page.setViewportSize(viewport);
-    assert.ok(await page.getByText('รุ่น OCR 2026.11.12.4',{exact:true}).isVisible());
+    assert.ok(await page.getByText('รุ่น OCR 2026.11.12.5',{exact:true}).isVisible());
     assert.ok(await page.locator('[data-ocrvendoradd="0"]').isVisible());
     assert.ok(await page.locator('[data-ocr="0:vendorBranch"]').isVisible());
     assert.ok(await page.locator('[data-ocracc="0:5360"]').isVisible());
-    assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).getAttribute('href'),'https://vsreg.rd.go.th/VATINFOWSWeb/jsp/administrator/vatservice.jsp');
+  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).count(),0);
    }
    await page.locator('[data-ocr="0:kind"]').selectOption('advance');
    await page.locator('[data-ocr="0:advanceId"]').selectOption('av1');

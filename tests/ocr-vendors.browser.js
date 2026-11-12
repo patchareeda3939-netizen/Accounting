@@ -26,18 +26,27 @@ let rdRows=[row];
   await page.evaluate(()=>{
    ocr.items=[{name:'receipt.jpg',data:{kind:'expense',vendorName:'ชื่อ OCR ผิด',vendorTaxId:'0107561000013',vendorBranch:'00056',docNo:'145479436610120364',items:[{name:'น้ำมัน',qty:1,price:934.58}],vatMode:'exclusive'}}];refreshPageData();
   });
-  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).getAttribute('href'),'https://vsreg.rd.go.th/VATINFOWSWeb/jsp/administrator/vatservice.jsp');
+  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).count(),0);
+  const branchInput=page.locator('[data-ocr="0:vendorBranch"]');
+  assert.equal(await branchInput.getAttribute('maxlength'),'5');
+  assert.equal(await branchInput.getAttribute('minlength'),'5');
+  await branchInput.fill('');await branchInput.pressSequentially('a00b0567');
+  assert.equal(await branchInput.inputValue(),'00056');
+  assert.equal(await page.locator('select[data-ocrvendor]').count(),0);
+  assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('list'),'ocrVendorList-0');
   await page.locator('[data-ocrrd="0"]').click();
   await page.waitForFunction(()=>window.lastToast || ocr.items[0].data.vendorName==='บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)',{},{timeout:25000});
   assert.equal(await page.evaluate(()=>window.lastToast),undefined);
-  assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'สาขาที่ 00056');
+  assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'00056');
   assert.equal(await page.locator('[data-ocr="0:docNo"]').inputValue(),'145479436610120364');
   assert.ok((await page.locator('.ocr-sum').innerText()).includes('65.42'));
   await page.locator('[data-ocrvendoradd="0"]').click();
   await page.waitForFunction(()=>STORE.contacts.length===1);
   await page.locator('[data-ocrvendoradd="0"]').click();assert.equal(await page.evaluate(()=>STORE.contacts.length),1);
   await page.locator('[data-ocr="0:vendorName"]').fill('เปลี่ยนชื่อ');await page.locator('[data-ocr="0:vendorName"]').dispatchEvent('change');
-  await page.locator('[data-ocrvendor="0"]').selectOption('vendor0');
+  const choice=await page.locator('#ocrVendorList-0 option').first().getAttribute('value');
+  await page.locator('[data-ocrvendor="0"]').fill(choice);
+  await page.locator('[data-ocrvendor="0"]').dispatchEvent('change');
   assert.equal(await page.locator('[data-ocr="0:vendorName"]').inputValue(),'บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)');
   if(!process.env.LIVE_RD){
    rdRows=[{...row,branchNo:'สำนักงานใหญ่'},row];
@@ -48,7 +57,7 @@ let rdRows=[row];
    await page.locator('[data-ocr="0:vendorBranch"]').fill('00056');
    await page.locator('[data-ocrrd="0"]').click();
    await page.waitForFunction(()=>ocr.items[0].data.vendorBranch==='สาขาที่ 00056');
-   assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'สาขาที่ 00056');
+   assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'00056');
   }
   if(!process.env.LIVE_RD){
    rdRows=[{...row,branchNo:'สำนักงานใหญ่',titleCode:'นาย',firstName:'ทดสอบ ระบบ'}];
