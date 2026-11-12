@@ -25,6 +25,7 @@ const row={nid:'0107561000013',branchNo:'00056',titleCode:'บริษัท',f
   await page.evaluate(()=>{
    ocr.items=[{name:'receipt.jpg',data:{kind:'expense',vendorName:'ชื่อ OCR ผิด',vendorTaxId:'0107561000013',vendorBranch:'00056',docNo:'145479436610120364',items:[{name:'น้ำมัน',qty:1,price:934.58}],vatMode:'exclusive'}}];refreshPageData();
   });
+  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).getAttribute('href'),'https://vsinter.rd.go.th/rd-webcontent-web/#/vatsearch');
   await page.locator('[data-ocrrd="0"]').click();
   await page.waitForFunction(()=>window.lastToast || ocr.items[0].data.vendorName==='บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)',{},{timeout:25000});
   assert.equal(await page.evaluate(()=>window.lastToast),undefined);

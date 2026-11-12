@@ -28,5 +28,7 @@ assert.equal(guess('', '', ['ค่าโทรศัพท์']), '5230','use a
 accounts.push({code:'5231',name:'ค่าสาธารณูปโภคสาขา'});
 assert.equal(guess('', '', ['ค่าโทรศัพท์']), '', 'ambiguous account remains unselected');
 accounts=[];assert.equal(guess('ค่าโทรศัพท์'), '');
-assert.ok(ctx.ocrAccountHint(manual,'',0).includes('ยังไม่มีข้อมูลพอ'));
+assert.ok(ctx.ocrAccountHint(manual,'',0).includes('หมวดที่แนะนำ: ค่าโทรศัพท์'));
+assert.ok(ctx.ocrAccountHint({items:[{name:'DIESEL B7'}]},'',0).includes('ค่าน้ำมัน'));
+assert.ok(ctx.ocrAccountHint({items:[{name:'บริการ'}]},'',0).includes('ยังไม่มีข้อมูลพอ'));
 console.log('PASS OCR account suggestions: ranked evidence, available accounts, reasons, manual choices, ambiguity and no evidence');
