@@ -5,7 +5,8 @@
   "scripts": {
     "build": "bash build.sh",
     "check:dist": "bash build.sh && git diff --exit-code -- dist index.html",
-    "test:ocr": "node tests/ocr.test.js && node tests/ocr-destinations.test.js",
+    "test:ocr": "node tests/ocr.test.js && node tests/ocr-destinations.test.js && node tests/ocr-accounts.test.js && node tests/ocr-vendors.test.js",
+    "test:ocr-browser": "node tests/ocr-vendors.browser.js",
     "test:smoke": "node tests/smoke.test.js",
     "test:payroll": "node tests/payroll.test.js",
     "test:payroll-reports": "node tests/payroll-reports.test.js",
