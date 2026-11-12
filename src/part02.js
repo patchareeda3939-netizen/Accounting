@@ -385,12 +385,16 @@ function fieldHTML(f, val, idPrefix) {
     ' value="' + esc(v) + '" placeholder="' + esc(f.placeholder || '') + '"></div>';
 }
 
+function contactRolesHTML(kind) {
+  kind = kind || 'customer';
+  return '<div class="field"><label>บทบาทรายชื่อ *</label><div role="group" aria-label="บทบาทรายชื่อ" style="display:flex;gap:20px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:6px"><input id="r_role_supplier" type="checkbox" style="width:auto"' + (kind === 'supplier' || kind === 'both' ? ' checked' : '') + '>ผู้ขาย</label><label style="display:flex;align-items:center;gap:6px"><input id="r_role_customer" type="checkbox" style="width:auto"' + (kind === 'customer' || kind === 'both' ? ' checked' : '') + '>ผู้ซื้อ</label></div><span class="small muted">เลือกอย่างน้อยหนึ่งรายการ หรือเลือกทั้งสองเมื่อเป็นทั้งผู้ขายและผู้ซื้อ</span></div>';
+}
 function openRecordForm(coll, rec, defaults) {
   if (coll === 'products' && typeof openProductForm === 'function') return openProductForm(rec, defaults);
   var meta = COLL_META[coll];
   var src = rec || defaults || {};
   if (coll === 'accounts') src = Object.assign({}, src, { accType: accSubtype(src) });
-  var body = meta.fields.map(function(f) { return fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
+  var body = meta.fields.map(function(f) { return coll === 'contacts' && f.key === 'kind' ? contactRolesHTML(src.kind) : fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
   var buttons = [];
   if (rec) buttons.push(confirmDeleteBtn(function(el) {
     runSave(el, async function() { await delRec(coll, rec._id); showToast('ลบแล้ว'); closeModal(); });
@@ -405,6 +409,12 @@ function saveRecord(btn, coll, rec) {
   var out = {};
   var err = null;
   meta.fields.forEach(function(f) {
+    if (coll === 'contacts' && f.key === 'kind') {
+      var seller = byId('r_role_supplier').checked, buyer = byId('r_role_customer').checked;
+      out.kind = seller && buyer ? 'both' : seller ? 'supplier' : buyer ? 'customer' : '';
+      if (!out.kind && !err) err = 'เลือกผู้ขายหรือผู้ซื้ออย่างน้อยหนึ่งรายการ';
+      return;
+    }
     var el = byId('r_' + f.key);
     var v = el.value.trim();
     if (f.required && !v && !err) err = 'กรุณาระบุ' + f.label;

@@ -41,7 +41,7 @@ jobs:
         run: npm run check:dist
 
       - name: OCR regression
-        run: npm run test:ocr && npm run test:ocr-browser
+        run: npm run test:ocr && npm run test:ocr-browser && npm run test:contacts
 
       - name: Smoke test (โหมดเบราว์เซอร์ / Claude DB)
         run: npm run test:smoke

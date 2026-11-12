@@ -1767,12 +1767,16 @@ function fieldHTML(f, val, idPrefix) {
     ' value="' + esc(v) + '" placeholder="' + esc(f.placeholder || '') + '"></div>';
 }
 
+function contactRolesHTML(kind) {
+  kind = kind || 'customer';
+  return '<div class="field"><label>บทบาทรายชื่อ *</label><div role="group" aria-label="บทบาทรายชื่อ" style="display:flex;gap:20px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:6px"><input id="r_role_supplier" type="checkbox" style="width:auto"' + (kind === 'supplier' || kind === 'both' ? ' checked' : '') + '>ผู้ขาย</label><label style="display:flex;align-items:center;gap:6px"><input id="r_role_customer" type="checkbox" style="width:auto"' + (kind === 'customer' || kind === 'both' ? ' checked' : '') + '>ผู้ซื้อ</label></div><span class="small muted">เลือกอย่างน้อยหนึ่งรายการ หรือเลือกทั้งสองเมื่อเป็นทั้งผู้ขายและผู้ซื้อ</span></div>';
+}
 function openRecordForm(coll, rec, defaults) {
   if (coll === 'products' && typeof openProductForm === 'function') return openProductForm(rec, defaults);
   var meta = COLL_META[coll];
   var src = rec || defaults || {};
   if (coll === 'accounts') src = Object.assign({}, src, { accType: accSubtype(src) });
-  var body = meta.fields.map(function(f) { return fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
+  var body = meta.fields.map(function(f) { return coll === 'contacts' && f.key === 'kind' ? contactRolesHTML(src.kind) : fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
   var buttons = [];
   if (rec) buttons.push(confirmDeleteBtn(function(el) {
     runSave(el, async function() { await delRec(coll, rec._id); showToast('ลบแล้ว'); closeModal(); });
@@ -1787,6 +1791,12 @@ function saveRecord(btn, coll, rec) {
   var out = {};
   var err = null;
   meta.fields.forEach(function(f) {
+    if (coll === 'contacts' && f.key === 'kind') {
+      var seller = byId('r_role_supplier').checked, buyer = byId('r_role_customer').checked;
+      out.kind = seller && buyer ? 'both' : seller ? 'supplier' : buyer ? 'customer' : '';
+      if (!out.kind && !err) err = 'เลือกผู้ขายหรือผู้ซื้ออย่างน้อยหนึ่งรายการ';
+      return;
+    }
     var el = byId('r_' + f.key);
     var v = el.value.trim();
     if (f.required && !v && !err) err = 'กรุณาระบุ' + f.label;
@@ -2838,7 +2848,7 @@ var SUBNAV_ITEMS = [
       { key:'salesOrder', label:'ใบสั่งขาย' },
       { key:'products', label:'ผลิตภัณฑ์และบริการ' }
     ] },
-  { key:'customers',  label:'ศูนย์กลางลูกค้า', color:'#2E8B6F', icon:'👥' },
+  { key:'customers',  label:'รายชื่อผู้ซื้อ/ผู้ขาย', color:'#2E8B6F', icon:'👥' },
   { key:'inventory',  label:'สินค้าคงคลัง', color:'#1B2E3A', icon:'📦', children: [
       { key:'overview', label:'ภาพรวม' },
       { key:'stock', label:'สินค้าคงคลัง' },
@@ -3946,10 +3956,10 @@ function journalData() {
 
 /* ---- Contacts ---- */
 function contactsShell(title) {
-  var tabs = [['all','ทั้งหมด'],['customer','ลูกค้า'],['supplier','ซัพพลายเออร์']].map(function(t) {
+  var tabs = [['all','ทั้งหมด'],['customer','ผู้ซื้อ'],['supplier','ผู้ขาย']].map(function(t) {
     return '<button class="chip-btn' + (pageState.contactTab === t[0] ? ' on' : '') + '" type="button" data-tab="' + t[0] + '">' + t[1] + '</button>';
   }).join('');
-  return pageHead(title || 'ศูนย์กลางลูกค้า', 'รายชื่อลูกค้าและซัพพลายเออร์ พร้อมเลขผู้เสียภาษี และยอดค้างชำระ', '<button class="btn btn-primary btn-sm" type="button" data-new="contacts">+ เพิ่มผู้ติดต่อ</button>') +
+  return pageHead(title || 'รายชื่อผู้ซื้อและผู้ขาย', 'รายชื่อคู่ค้า เลือกเป็นผู้ซื้อ ผู้ขาย หรือทั้งสอง พร้อมเลขผู้เสียภาษีและยอดค้างชำระ', '<button class="btn btn-primary btn-sm" type="button" data-new="contacts">+ เพิ่มผู้ติดต่อ</button>') +
     '<div class="toolbar">' + tabs + '<div class="field grow" style="margin-left:auto;max-width:320px"><label for="cq">ค้นหา</label><input id="cq" type="search" data-state="page.contactQ" value="' + esc(pageState.contactQ) + '" placeholder="ชื่อ เลขภาษี หรือเบอร์โทร"></div></div>';
 }
 function contactsData() {
@@ -3959,7 +3969,7 @@ function contactsData() {
     if (tab === 'supplier' && c.kind === 'customer') return false;
     return !q || [c.name, c.taxId, c.phone, c.email].join(' ').toLowerCase().indexOf(q) >= 0;
   });
-  var KIND = { customer:'ลูกค้า', supplier:'ซัพพลายเออร์', both:'ลูกค้า/ซัพพลายเออร์' };
+  var KIND = { customer:'ผู้ซื้อ', supplier:'ผู้ขาย', both:'ผู้ซื้อ / ผู้ขาย' };
   var rows = list.map(function(c) {
     var ar = sumNet(openItems('invoice').filter(function(d) { return d.party === c.name; }));
     var ap = sumNet(openItems('bill').filter(function(d) { return d.party === c.name; }));
