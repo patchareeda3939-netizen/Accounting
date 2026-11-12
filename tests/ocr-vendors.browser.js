@@ -50,6 +50,14 @@ let rdRows=[row];
    await page.waitForFunction(()=>ocr.items[0].data.vendorBranch==='สาขาที่ 00056');
    assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'สาขาที่ 00056');
   }
+  if(!process.env.LIVE_RD){
+   rdRows=[{...row,branchNo:'สำนักงานใหญ่',titleCode:'นาย',firstName:'ทดสอบ ระบบ'}];
+   await page.locator('[data-ocr="0:vendorEntity"]').selectOption('person');
+   await page.locator('[data-ocr="0:vendorBranch"]').fill('');
+   await page.locator('[data-ocrrd="0"]').click();
+   await page.waitForFunction(()=>ocr.items[0].data.vendorName==='นาย ทดสอบ ระบบ');
+   assert.equal(await page.locator('[data-ocr="0:vendorEntity"]').inputValue(),'person');
+  }
   assert.deepEqual(errors,[]);
   console.log('PASS OCR browser: '+(process.env.LIVE_RD?'live RD lookup':'mocked RD response')+', branch autofill, invoice/VAT display, add/select vendor and duplicate prevention');
  } finally {if(browser)await browser.close();await new Promise(r=>server.close(r));}
