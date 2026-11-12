@@ -51,6 +51,7 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   ctx.URL = {createObjectURL: () => 'blob:test'};
   ctx.todayStr = () => '2026-11-11';
   ctx.ocrGuessAccount = () => '';
+  ctx.STORE = {contacts:[]};
   ctx.refreshPageData = () => {};
   await ctx.ocrAddFiles([{name:'receipt.jpg'}]);
   for (let tick = 0; tick < 20 && !ctx.ocr.items[0].data && !ctx.ocr.items[0].err; tick++) await new Promise(setImmediate);
