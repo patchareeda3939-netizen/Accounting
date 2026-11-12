@@ -7391,6 +7391,21 @@ var OCR_PROMPT = 'คุณคือผู้ช่วยบัญชีไท�
   '{"vendorName":"ชื่อผู้ขาย/ร้าน","vendorTaxId":"เลขผู้เสียภาษี 13 หลักของผู้ขาย (ตัวเลขล้วน) หรือ \\"\\"","vendorAddress":"","vendorBranch":"เช่น สำนักงานใหญ่ หรือ สาขาที่ 00001","docNo":"เลขที่ใบกำกับ/ใบเสร็จ","date":"YYYY-MM-DD (แปลง พ.ศ. เป็น ค.ศ.)","dueDate":"YYYY-MM-DD หรือ \\"\\"",' +
   '"items":[{"name":"ชื่อรายการ","qty":1,"price":0}],"vatMode":"exclusive|inclusive|none","subtotal":0,"vat":0,"total":0,"whtRate":0,"paid":true,"category":"หมวดค่าใช้จ่ายสั้นๆ เช่น ค่าน้ำมัน ค่าอาหาร ค่าเช่า ค่าบริการ วัสดุสำนักงาน"}\n' +
   'กติกา: price เป็นราคาต่อหน่วยตามที่พิมพ์ในเอกสาร; ถ้าราคาในรายการรวม VAT แล้วให้ vatMode="inclusive"; ถ้าแยก VAT 7% ท้ายบิลให้ "exclusive"; ถ้าไม่มี VAT ให้ "none"; ถ้าเป็นใบแจ้งหนี้/บิลที่ยังไม่ชำระให้ paid=false; ตัวเลขเป็น number ไม่มีคอมมา; อ่านไม่ออกให้เว้นว่าง';
+function ocrExpenseItemName(category, text) {
+  var cat = String(category || '').trim();
+  if (cat && !/^(ค่าใช้จ่ายตามเอกสาร|ค่าใช้จ่าย|ค่าบริการ|อื่น\s*ๆ|other)$/i.test(cat)) return cat;
+  var matches = OCR_ACCOUNT_RULES.filter(function(rule) { return rule[0].test(normThaiOcr(text)); });
+  return matches.length === 1 ? matches[0][2] : (cat || 'ค่าใช้จ่ายตามเอกสาร');
+}
+function ocrReceiptItems(j, text) {
+  var name = ocrExpenseItemName(j.category, text);
+  if (Array.isArray(j.items) && j.items.length) return j.items.map(function(x) {
+    var itemName = String(x.name || '').trim();
+    if (j.items.length === 1 && (!itemName || /^(ค่าใช้จ่ายตามเอกสาร|ค่าใช้จ่าย)$/.test(itemName))) itemName = name;
+    return { name:itemName, qty:Number(x.qty) || 1, price:Number(x.price) || 0 };
+  });
+  return [{ name:name, qty:1, price:Number(j.subtotal || j.total) || 0 }];
+}
 async function ocrAddFiles(files) {
   if (!files.length) return;
   var engine = (byId('ocrEngine') || {}).value || ocrEngine();
@@ -7411,7 +7426,7 @@ async function ocrAddFiles(files) {
           var nativeText = text === r.text; text = normThaiOcr(text); it.rawText = text;
           j = parseReceiptText(text); via = nativeText ? 'ข้อความใน PDF' : 'Tesseract';
         }
-        var items = Array.isArray(j.items) && j.items.length ? j.items.map(function(x) { return { name: String(x.name || ''), qty: Number(x.qty) || 1, price: Number(x.price) || 0 }; }) : [{ name: j.category || 'ค่าใช้จ่ายตามเอกสาร', qty: 1, price: Number(j.subtotal || j.total) || 0 }];
+        var items = ocrReceiptItems(j, it.rawText || r.text);
         var acc = ocrGuessAccount(j.category, j.vendorName, items, it.rawText);
         it.data = { category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
         var knownVendor = ocrVendorMatch(it.data);
