@@ -1,11 +1,14 @@
 
 /* ================= Document reading (OCR via Claude) — accounting:receiptCapture ================= */
+var OCR_UI_VERSION = '2026.11.12.3';
+var OCR_RD_SEARCH_URL = 'https://vsinter.rd.go.th/rd-webcontent-web/#/vatsearch';
 var ocr = { items: [], busy: false };
 function ocrEngine() { try { return localStorage.getItem('psm_ocr') || 'tess'; } catch (e) { return 'tess'; } }
 var SAMPLE = null;
 function getSample() { if (SAMPLE) return Promise.resolve(SAMPLE); return (window.claude && window.claude.use ? window.claude.use('sample') : Promise.resolve(null)).then(function(s) { SAMPLE = s; return s; }).catch(function() { return null; }); }
 function ocrShell() {
   return '<div class="coa-bar"><div><h1 class="section-title" style="margin:0">อ่านเอกสาร (OCR)</h1><p class="section-sub">อัปโหลดรูปใบเสร็จ ใบกำกับภาษี หรือบิล (รูปภาพ/PDF) ระบบจะอ่านผู้ขาย เลขที่ วันที่ รายการ VAT และยอดรวม แล้วสร้างเป็นค่าใช้จ่ายหรือบิลให้</p></div></div>' +
+    '<div class="small muted">รุ่น OCR ' + OCR_UI_VERSION + '</div>' +
     '<div class="coa-filters"><label class="date-chip">ตัวอ่าน OCR: <select id="ocrEngine"><option value="tess"' + (ocrEngine() === 'tess' ? ' selected' : '') + '>Tesseract (อ่านในเครื่อง ฟรี)</option><option value="auto"' + (ocrEngine() === 'auto' ? ' selected' : '') + '>Claude ก่อน ถ้าไม่ได้ใช้ Tesseract</option><option value="claude"' + (ocrEngine() === 'claude' ? ' selected' : '') + '>Claude อย่างเดียว</option></select></label></div>' +
     '<label class="ocr-drop" id="ocrDrop"><input type="file" id="ocrFile" accept="image/*,application/pdf" multiple hidden><span class="ocr-ic">📄</span><b>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</b><span class="small muted">JPG, PNG, HEIC หรือ PDF · เลือกได้หลายไฟล์</span></label>';
 }
@@ -105,7 +108,7 @@ function ocrVendorFields(d, it, i, v) {
   return '<div class="field"><label>เลือกผู้ขายจากรายชื่อ</label><select data-ocrvendor="' + i + '"><option value="">— เลือกรายชื่อเดิม —</option>' + STORE.contacts.filter(function(c) { return c.kind !== 'customer'; }).map(function(c) { return '<option value="' + esc(c._id) + '">' + esc(c.name + ' · ' + (c.taxId || '') + ' · ' + (c.branch || 'ไม่ระบุสาขา')) + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label>ผู้ขาย</label>' + v('vendorName', d.vendorName) + '</div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
     '<div class="field"><label>สาขาผู้ขาย</label>' + v('vendorBranch', d.vendorBranch) + '</div><div class="field"><label>ที่อยู่ผู้ขาย</label>' + v('vendorAddress', d.vendorAddress) + '</div>' +
-    '<div class="field"><div><button type="button" class="btn btn-outline" data-ocrrd="' + i + '">ค้นจากกรมสรรพากร</button> <button type="button" class="btn btn-outline" data-ocrvendoradd="' + i + '">+ เพิ่มรายชื่อผู้ขาย</button></div><a class="small" href="https://eservice.rd.go.th/rd-ves-web/search/vat" target="_blank" rel="noopener noreferrer">เปิดเว็บตรวจสอบ VAT กรมสรรพากร</a>' + (it.vendorLookup ? '<span class="small muted">' + esc(it.vendorLookup) + '</span>' : '') + '</div>';
+    '<div class="field"><div><a class="btn btn-outline" href="' + OCR_RD_SEARCH_URL + '" target="_blank" rel="noopener noreferrer">ค้น VAT ที่เว็บกรมสรรพากร</a> <button type="button" class="btn btn-outline" data-ocrrd="' + i + '">ดึงชื่อ/ที่อยู่อัตโนมัติ</button> <button type="button" class="btn btn-outline" data-ocrvendoradd="' + i + '">+ เพิ่มรายชื่อผู้ขาย</button></div><span class="small muted">ค้นเว็บ VAT ตามเลขผู้เสียภาษีและสาขา · ดึงอัตโนมัติใช้บริการ eservice กรมสรรพากร</span>' + (it.vendorLookup ? '<span class="small muted">' + esc(it.vendorLookup) + '</span>' : '') + '</div>';
 }
 function ocrData() {
   if (!ocr.items.length) return '<p class="empty-hint">ยังไม่มีเอกสารที่อ่าน</p>';
@@ -386,15 +389,12 @@ function parseReceiptText(text) {
   j.category = '';
   return j;
 }
-// Rank against the company's own expense accounts; descriptions outrank vendors.
-function ocrAccountSuggestions(cat, vendor, items, rawText) {
-  var list = accountsFor('supplier'), found = {};
-  var rules = [
+var OCR_ACCOUNT_RULES = [
     [/โทรศัพท์|ค่าโทร|มือถือ|แพ็กเกจ|telephone|mobile|\bAIS\b|\bDTAC\b/i, [/โทรศัพท์|สื่อสาร/, /สาธารณูปโภค/], 'ค่าโทรศัพท์'],
     [/อินเทอร์เน็ต|อินเตอร์เน็ต|internet|broadband|wifi/i, [/อินเทอร์เน็ต|อินเตอร์เน็ต/, /สื่อสาร|โทรศัพท์/, /สาธารณูปโภค/], 'ค่าอินเทอร์เน็ต'],
     [/ค่าไฟ|ไฟฟ้า|electricity/i, [/ไฟฟ้า/, /สาธารณูปโภค/], 'ค่าไฟฟ้า'],
     [/ค่าน้ำ(?!มัน)|ประปา|water bill/i, [/ประปา|ค่าน้ำ(?!มัน)/, /สาธารณูปโภค/], 'ค่าน้ำประปา'],
-    [/น้ำมัน|ปตท|\bPTT\b|บางจาก|Shell|Caltex|fuel/i, [/น้ำมัน/, /เดินทาง|พาหนะ/], 'ค่าน้ำมัน'],
+    [/น้ำมัน|ดีเซล|เบนซิน|แก๊สโซฮอล์|diesel|ปตท|\bPTT\b|บางจาก|Shell|Caltex|fuel/i, [/น้ำมัน/, /เดินทาง|พาหนะ/], 'ค่าน้ำมัน'],
     [/ค่าเช่า|rent(?:al)?/i, [/เช่า/], 'ค่าเช่า'],
     [/อาหาร|เครื่องดื่ม|กาแฟ|restaurant|coffee/i, [/อาหาร|เครื่องดื่ม/, /รับรอง/], 'ค่าอาหารและเครื่องดื่ม'],
     [/เครื่องเขียน|กระดาษ|หมึกพิมพ์|วัสดุสำนักงาน|stationery/i, [/วัสดุสำนักงาน|เครื่องเขียน/, /วัสดุ/], 'วัสดุสำนักงาน'],
@@ -403,6 +403,10 @@ function ocrAccountSuggestions(cat, vendor, items, rawText) {
     [/โฆษณา|advertising/i, [/โฆษณา|การตลาด/], 'ค่าโฆษณา'],
     [/ค่าธรรมเนียม|bank fee/i, [/ธรรมเนียม/], 'ค่าธรรมเนียม']
   ];
+// Rank against the company's own expense accounts; descriptions outrank vendors.
+function ocrAccountSuggestions(cat, vendor, items, rawText) {
+  var list = accountsFor('supplier'), found = {};
+
   var sources = [[cat || '', 100, 'หมวดที่อ่านได้'], [(items || []).map(function(x) { return x.name || ''; }).filter(function(n) { return !/^(ค่าใช้จ่ายตามเอกสาร|ค่าบริการ)$/.test(n); }).join(' '), 90, 'รายการในเอกสาร'], [rawText || '', 60, 'ข้อความ OCR'], [vendor || '', 40, 'ชื่อผู้ขาย']];
   function add(a, score, reason) { if (!found[a.code] || found[a.code].score < score) found[a.code] = { code: a.code, name: a.name, score: score, reason: reason }; }
   sources.forEach(function(src) {
@@ -412,7 +416,7 @@ function ocrAccountSuggestions(cat, vendor, items, rawText) {
       var name = String(a.name || '').replace(/^ค่า/, '').trim();
       if (name.length >= 4 && !/^(ใช้จ่าย|บริการ|อื่นๆ|อื่น ๆ)$/.test(name) && src[0].indexOf(name) >= 0) add(a, src[1] + 5, src[2] + 'ตรงกับ ' + a.name);
     });
-    rules.forEach(function(rule) {
+    OCR_ACCOUNT_RULES.forEach(function(rule) {
       if (!rule[0].test(src[0])) return;
       for (var i = 0; i < rule[1].length; i++) {
         var matches = list.filter(function(a) { return rule[1][i].test(a.name || ''); });
@@ -429,7 +433,12 @@ function ocrGuessAccount(cat, vendor, items, rawText) {
 }
 function ocrAccountHint(d, rawText, i) {
   var suggestions = ocrAccountSuggestions(d.category, d.vendorName, d.items, rawText);
-  if (!suggestions.length) return '<span class="small muted">ยังไม่มีข้อมูลพอแนะนำบัญชี เลือกบัญชีค่าใช้จ่ายเองได้</span>';
+  if (!suggestions.length) {
+    var text = [d.category, d.vendorName, rawText].concat((d.items || []).map(function(x) { return x.name; })).join(' ');
+    var categories = OCR_ACCOUNT_RULES.filter(function(r) { return r[0].test(text); }).map(function(r) { return r[2]; });
+    if (categories.length) return '<div class="small muted">หมวดที่แนะนำ: ' + esc(categories.slice(0, 3).join(' · ')) + ' · ยังไม่มีบัญชีที่ตรงกันในผังบัญชี กรุณาเลือกหรือเพิ่มบัญชีค่าใช้จ่าย</div>';
+    return '<span class="small muted">ยังไม่มีข้อมูลพอแนะนำบัญชี เลือกบัญชีค่าใช้จ่ายเองได้</span>';
+  }
   return '<div class="small muted">บัญชีที่แนะนำ (เลือกเปลี่ยนได้)</div>' + suggestions.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(a.reason) + '</div>'; }).join('');
 }
 async function ocrCreate(i, btn) {
