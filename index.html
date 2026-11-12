@@ -7180,6 +7180,33 @@ function ocrShell() {
     '<div class="coa-filters"><label class="date-chip">ตัวอ่าน OCR: <select id="ocrEngine"><option value="tess"' + (ocrEngine() === 'tess' ? ' selected' : '') + '>Tesseract (อ่านในเครื่อง ฟรี)</option><option value="auto"' + (ocrEngine() === 'auto' ? ' selected' : '') + '>Claude ก่อน ถ้าไม่ได้ใช้ Tesseract</option><option value="claude"' + (ocrEngine() === 'claude' ? ' selected' : '') + '>Claude อย่างเดียว</option></select></label></div>' +
     '<label class="ocr-drop" id="ocrDrop"><input type="file" id="ocrFile" accept="image/*,application/pdf" multiple hidden><span class="ocr-ic">📄</span><b>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</b><span class="small muted">JPG, PNG, HEIC หรือ PDF · เลือกได้หลายไฟล์</span></label>';
 }
+var OCR_DESTINATIONS = [['expense', 'บันทึกค่าใช้จ่าย (จ่ายแล้ว)'], ['bill', 'บิลซื้อ (ยังไม่จ่าย)'], ['advance', 'เงินทดรองจ่าย (เคลียร์ใบเสร็จ)'], ['pettyCash', 'เงินสดย่อย']];
+function ocrDestinationFields(d, i) {
+  var html = '<div class="field"><label>บันทึกไปที่</label><select data-ocr="' + i + ':kind"' + (d._saved ? ' disabled' : '') + '>' + OCR_DESTINATIONS.map(function(x) { return '<option value="' + x[0] + '"' + (d.kind === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>';
+  if (d.kind === 'pettyCash') {
+    html += '<div class="field"><label>กองทุนเงินสดย่อย</label><select data-ocr="' + i + ':pettyFund"><option value="">— เลือกกองทุน —</option>' + pcFunds().map(function(f) { return '<option value="' + esc(f.id) + '"' + (d.pettyFund === f.id ? ' selected' : '') + '>' + esc(f.name) + '</option>'; }).join('') + '</select>' + (!pcFunds().length ? '<span class="small muted">ตั้งกองทุนในเมนูเงินสดย่อยก่อนบันทึก</span>' : '') + '</div>';
+  } else if (d.kind === 'advance') {
+    var advances = STORE.documents.filter(function(a) { return a.type === 'advance' && !a.voided && advInfo(a).st !== 'done'; });
+    html += '<div class="field"><label>รายการเงินทดรองที่ใช้จ่าย</label><select data-ocr="' + i + ':advanceId"><option value="">— เลือกเงินทดรอง —</option>' + advances.map(function(a) { return '<option value="' + esc(a._id) + '"' + (d.advanceId === a._id ? ' selected' : '') + '>' + esc((a.docNo || '') + ' · ' + a.party) + '</option>'; }).join('') + '</select><span class="small muted">บันทึกใบเสร็จเป็นค่าใช้จ่ายเพื่อเคลียร์เงินทดรองที่เลือก</span></div>';
+  }
+  return html;
+}
+function ocrPaymentExtra(d) {
+  if (!OCR_DESTINATIONS.some(function(x) { return x[0] === d.kind; })) throw new Error('เลือกปลายทางเอกสารก่อน');
+  if (d.kind === 'bill') return d.dueDate ? { dueDate: d.dueDate } : {};
+  if (d.kind === 'pettyCash') {
+    var f = pcFund(d.pettyFund);
+    if (!f || !f.acc) throw new Error('เลือกกองทุนเงินสดย่อยก่อน');
+    return { method: 'เงินสด', bankAcc: f.acc, pettyFund: f.id };
+  }
+  if (d.kind === 'advance') {
+    var a = STORE.documents.find(function(x) { return x._id === d.advanceId && x.type === 'advance' && !x.voided; });
+    if (!a || !a.extra || !a.extra.advAcc || advInfo(a).st === 'done') throw new Error('เลือกเงินทดรองที่ยังไม่เคลียร์ก่อน');
+    if (d.date < a.date) throw new Error('วันที่ค่าใช้จ่ายต้องไม่ก่อนวันที่จ่ายเงินทดรอง');
+    return { method: 'เงินสด', bankAcc: a.extra.advAcc, advanceId: a._id };
+  }
+  return { method: 'โอนเงิน' };
+}
 function ocrData() {
   if (!ocr.items.length) return '<p class="empty-hint">ยังไม่มีเอกสารที่อ่าน</p>';
   return ocr.items.map(function(it, i) {
@@ -7189,7 +7216,7 @@ function ocrData() {
     if (it.data) {
       var d = it.data, v = function(k, val, type, w) { return '<input data-ocr="' + i + ':' + k + '" value="' + esc(val == null ? '' : val) + '"' + (type ? ' type="' + type + '"' : '') + (w ? ' style="width:' + w + '"' : '') + '>'; };
       h += '<div class="ocr-form"><div class="grid-2">' +
-        '<div class="field"><label>สร้างเป็น</label><select data-ocr="' + i + ':kind"><option value="expense"' + (d.kind !== 'bill' ? ' selected' : '') + '>ค่าใช้จ่าย (จ่ายแล้ว)</option><option value="bill"' + (d.kind === 'bill' ? ' selected' : '') + '>บิลซื้อ (ยังไม่จ่าย)</option></select></div>' +
+        ocrDestinationFields(d, i) +
         '<div class="field"><label>บัญชีค่าใช้จ่าย</label><select data-ocr="' + i + ':account"><option value="">— ค่าเริ่มต้น —</option>' + accountsFor('supplier').map(function(a) { return '<option value="' + esc(a.code) + '"' + (d.account === a.code ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
         '<div class="field"><label>ผู้ขาย</label>' + v('vendorName', d.vendorName) + '</div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
         '<div class="field"><label>เลขที่ใบกำกับ/บิล</label>' + v('docNo', d.docNo) + '</div><div class="field"><label>วันที่</label>' + v('date', d.date, 'date') + '</div>' +
@@ -7460,8 +7487,10 @@ function ocrGuessAccount(cat, vendor, items) {
   return '';
 }
 async function ocrCreate(i, btn) {
-  var it = ocr.items[i], d = it.data; if (!d) return;
+  var it = ocr.items[i], d = it.data; if (!d || it.docId) return;
   if (!d.vendorName) { showToast('ใส่ชื่อผู้ขายก่อน'); return; }
+  var payment;
+  try { payment = ocrPaymentExtra(d); } catch (e) { showToast(e.message); return; }
   btn.disabled = true; btn.textContent = 'กำลังสร้าง…';
   try {
     if (!STORE.contacts.some(function(c) { return c.name === d.vendorName; })) await addRec('contacts', { name: d.vendorName, kind:'supplier', entity: /บริษัท|หจก|ห้างหุ้นส่วน|จำกัด/.test(d.vendorName) ? 'company' : 'person', taxId: /^\d{13}$/.test(d.vendorTaxId) ? d.vendorTaxId : '', branch: d.vendorBranch || '', address: d.vendorAddress || '', createdAt: Date.now() });
@@ -7470,11 +7499,12 @@ async function ocrCreate(i, btn) {
     if (A) { try { att.push(attRecord(await A.upload(it.file), it.file)); } catch (e) {} }
     var t = ocrTotals(d), type = d.kind === 'bill' ? 'bill' : 'expense', def = DOC_TYPES[type], a = d.account && STORE.accounts.find(function(x) { return x.code === d.account; });
     var extra = { supInvNo: d.docNo, supInvDate: d.date, account: a ? a.code : '', expCategory: a ? a.name : '', attachments: att, note: 'อ่านจากเอกสาร ' + it.file.name, ocr: true };
-    if (type === 'expense') extra.method = 'โอนเงิน'; else if (d.dueDate) extra.dueDate = d.dueDate;
+    Object.assign(extra, payment);
     var rec = { type: type, typeLabel: def.label, group:'supplier', party: d.vendorName, date: d.date, docNo: nextDocNo(type, d.date), items: def.template === 'itemized' ? d.items.map(function(r) { return { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; }) : null,
       vatMode: d.vatMode, whtRate: Number(d.whtRate) || 0, subtotal: t.subtotal, vat: t.vat, total: t.total, wht: t.wht, net: t.net, extra: extra, status: def.status ? 'unpaid' : 'done', createdAt: Date.now() };
     it.docId = await addRec('documents', rec);
     if (!it.docId) { var f = STORE.documents.find(function(x) { return x.docNo === rec.docNo; }); it.docId = f && f._id; }
+    if (it.docId) d._saved = true;
     showToast(def.label + ' ' + rec.docNo + ' สร้างแล้ว');
   } catch (e) { showToast('สร้างไม่สำเร็จ: ' + (e.message || e)); btn.disabled = false; btn.textContent = 'สร้างเอกสาร'; }
   refreshPageData();
