@@ -43,8 +43,11 @@ let rdRows=[row];
    rdRows=[{...row,branchNo:'สำนักงานใหญ่'},row];
    await page.locator('[data-ocr="0:vendorBranch"]').fill('');
    await page.locator('[data-ocrrd="0"]').click();
-   await page.locator('[data-ocrrdresult="0"]').waitFor();
-   await page.locator('[data-ocrrdresult="0"]').selectOption('1');
+   assert.ok((await page.evaluate(()=>window.lastToast)).includes('กรอกสาขา'));
+   assert.equal(await page.locator('[data-ocrrdresult="0"]').count(),0);
+   await page.locator('[data-ocr="0:vendorBranch"]').fill('00056');
+   await page.locator('[data-ocrrd="0"]').click();
+   await page.waitForFunction(()=>ocr.items[0].data.vendorBranch==='สาขาที่ 00056');
    assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'สาขาที่ 00056');
   }
   assert.deepEqual(errors,[]);
