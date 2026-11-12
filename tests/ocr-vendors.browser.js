@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const {chromium} = require('playwright');
 const row={nid:'0107561000013',branchNo:'00056',titleCode:'บริษัท',firstName:'ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)',addressInformation:{addNo:'16',mooNo:'12',ampName:'น้ำพอง',provName:'ขอนแก่น',postCode:'40140'}};
+let rdRows=[row];
 (async()=>{
  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<div id="pageData"></div><select id="ocrEngine"><option value="tess">tess</option></select>');});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -12,7 +13,7 @@ const row={nid:'0107561000013',branchNo:'00056',titleCode:'บริษัท',f
   browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),...(process.env.BROWSER_PROXY?{proxy:{server:process.env.BROWSER_PROXY,bypass:'127.0.0.1,localhost'}}:{}),args:['--no-sandbox']});
   const page=await browser.newPage();const errors=[];if(process.env.LIVE_RD) page.on('requestfailed',r=>console.error('RD network error:',r.failure()?.errorText));page.on('pageerror',e=>errors.push(e.message));
   await page.route(/^http:\/\/127\.0\.0\.1:/,r=>r.fulfill({contentType:'text/html',body:'<div id="pageData"></div><select id="ocrEngine"><option value="tess">tess</option></select>'}));
-  if(!process.env.LIVE_RD) await page.route('https://eservice.rd.go.th/rd-ves-service/**',r=>r.fulfill({json:[row]}));
+  if(!process.env.LIVE_RD) await page.route('https://eservice.rd.go.th/rd-ves-service/**',r=>r.fulfill({json:rdRows}));
   await page.goto('http://127.0.0.1:'+server.address().port);
   await page.evaluate(()=>{
    window.STORE={contacts:[],accounts:[],documents:[]}; window.byId=id=>document.getElementById(id);
@@ -25,7 +26,7 @@ const row={nid:'0107561000013',branchNo:'00056',titleCode:'บริษัท',f
   await page.evaluate(()=>{
    ocr.items=[{name:'receipt.jpg',data:{kind:'expense',vendorName:'ชื่อ OCR ผิด',vendorTaxId:'0107561000013',vendorBranch:'00056',docNo:'145479436610120364',items:[{name:'น้ำมัน',qty:1,price:934.58}],vatMode:'exclusive'}}];refreshPageData();
   });
-  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).getAttribute('href'),'https://vsinter.rd.go.th/rd-webcontent-web/#/vatsearch');
+  assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).getAttribute('href'),'https://vsreg.rd.go.th/VATINFOWSWeb/jsp/administrator/vatservice.jsp');
   await page.locator('[data-ocrrd="0"]').click();
   await page.waitForFunction(()=>window.lastToast || ocr.items[0].data.vendorName==='บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)',{},{timeout:25000});
   assert.equal(await page.evaluate(()=>window.lastToast),undefined);
@@ -38,6 +39,25 @@ const row={nid:'0107561000013',branchNo:'00056',titleCode:'บริษัท',f
   await page.locator('[data-ocr="0:vendorName"]').fill('เปลี่ยนชื่อ');await page.locator('[data-ocr="0:vendorName"]').dispatchEvent('change');
   await page.locator('[data-ocrvendor="0"]').selectOption('vendor0');
   assert.equal(await page.locator('[data-ocr="0:vendorName"]').inputValue(),'บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)');
+  if(!process.env.LIVE_RD){
+   rdRows=[{...row,branchNo:'สำนักงานใหญ่'},row];
+   await page.locator('[data-ocr="0:vendorBranch"]').fill('');
+   await page.locator('[data-ocrrd="0"]').click();
+   assert.ok((await page.evaluate(()=>window.lastToast)).includes('กรอกสาขา'));
+   assert.equal(await page.locator('[data-ocrrdresult="0"]').count(),0);
+   await page.locator('[data-ocr="0:vendorBranch"]').fill('00056');
+   await page.locator('[data-ocrrd="0"]').click();
+   await page.waitForFunction(()=>ocr.items[0].data.vendorBranch==='สาขาที่ 00056');
+   assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').inputValue(),'สาขาที่ 00056');
+  }
+  if(!process.env.LIVE_RD){
+   rdRows=[{...row,branchNo:'สำนักงานใหญ่',titleCode:'นาย',firstName:'ทดสอบ ระบบ'}];
+   await page.locator('[data-ocr="0:vendorEntity"]').selectOption('person');
+   await page.locator('[data-ocr="0:vendorBranch"]').fill('');
+   await page.locator('[data-ocrrd="0"]').click();
+   await page.waitForFunction(()=>ocr.items[0].data.vendorName==='นาย ทดสอบ ระบบ');
+   assert.equal(await page.locator('[data-ocr="0:vendorEntity"]').inputValue(),'person');
+  }
   assert.deepEqual(errors,[]);
   console.log('PASS OCR browser: '+(process.env.LIVE_RD?'live RD lookup':'mocked RD response')+', branch autofill, invoice/VAT display, add/select vendor and duplicate prevention');
  } finally {if(browser)await browser.close();await new Promise(r=>server.close(r));}
