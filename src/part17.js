@@ -46,7 +46,7 @@ function ocrData() {
       var d = it.data, v = function(k, val, type, w) { return '<input data-ocr="' + i + ':' + k + '" value="' + esc(val == null ? '' : val) + '"' + (type ? ' type="' + type + '"' : '') + (w ? ' style="width:' + w + '"' : '') + '>'; };
       h += '<div class="ocr-form"><div class="grid-2">' +
         ocrDestinationFields(d, i) +
-        '<div class="field"><label>บัญชีค่าใช้จ่าย</label><select data-ocr="' + i + ':account"><option value="">— ค่าเริ่มต้น —</option>' + accountsFor('supplier').map(function(a) { return '<option value="' + esc(a.code) + '"' + (d.account === a.code ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
+        '<div class="field"><label>บัญชีค่าใช้จ่าย</label><select data-ocr="' + i + ':account"><option value="">— ค่าเริ่มต้น —</option>' + accountsFor('supplier').map(function(a) { return '<option value="' + esc(a.code) + '"' + (d.account === a.code ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select>' + ocrAccountHint(d, it.rawText, i) + '</div>' +
         '<div class="field"><label>ผู้ขาย</label>' + v('vendorName', d.vendorName) + '</div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
         '<div class="field"><label>เลขที่ใบกำกับ/บิล</label>' + v('docNo', d.docNo) + '</div><div class="field"><label>วันที่</label>' + v('date', d.date, 'date') + '</div>' +
         '<div class="field"><label>ราคาในเอกสาร</label><select data-ocr="' + i + ':vatMode"><option value="exclusive"' + (d.vatMode === 'exclusive' ? ' selected' : '') + '>ยังไม่รวม VAT</option><option value="inclusive"' + (d.vatMode === 'inclusive' ? ' selected' : '') + '>รวม VAT แล้ว</option><option value="none"' + (d.vatMode === 'none' ? ' selected' : '') + '>ไม่มี VAT</option></select></div>' +
@@ -78,6 +78,7 @@ function bindOcr() {
   }
   var c = byId('pageData'); if (!c) return;
   c.querySelectorAll('[data-ocr]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocr.split(':'), it = ocr.items[Number(s[0])]; it.data[s[1]] = el.value; refreshPageData(); }; });
+  c.querySelectorAll('[data-ocracc]').forEach(function(b) { b.onclick = function() { var s = b.dataset.ocracc.split(':'), it = ocr.items[Number(s[0])]; if (it && it.data && !it.docId) { it.data.account = s.slice(1).join(':'); refreshPageData(); } }; });
   c.querySelectorAll('[data-ocri]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocri.split(':'), r = ocr.items[Number(s[0])].data.items[Number(s[1])]; r[s[2]] = s[2] === 'name' ? el.value : Number(el.value) || 0; refreshPageData(); }; });
   c.querySelectorAll('[data-ocrdel]').forEach(function(b) { b.onclick = function() { var s = b.dataset.ocrdel.split(':'); ocr.items[Number(s[0])].data.items.splice(Number(s[1]), 1); refreshPageData(); }; });
   c.querySelectorAll('[data-ocradd]').forEach(function(b) { b.onclick = function() { ocr.items[Number(b.dataset.ocradd)].data.items.push({ name:'', qty:1, price:0 }); refreshPageData(); }; });
@@ -162,8 +163,8 @@ async function ocrAddFiles(files) {
           j = parseReceiptText(text); via = nativeText ? 'ข้อความใน PDF' : 'Tesseract';
         }
         var items = Array.isArray(j.items) && j.items.length ? j.items.map(function(x) { return { name: String(x.name || ''), qty: Number(x.qty) || 1, price: Number(x.price) || 0 }; }) : [{ name: j.category || 'ค่าใช้จ่ายตามเอกสาร', qty: 1, price: Number(j.subtotal || j.total) || 0 }];
-        var acc = ocrGuessAccount(j.category, j.vendorName, items);
-        it.data = { kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
+        var acc = ocrGuessAccount(j.category, j.vendorName, items, it.rawText);
+        it.data = { category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
         it.status = 'อ่านด้วย ' + via + ' แล้ว ตรวจสอบก่อนกดสร้างเอกสาร';
       } catch (e) { it.err = 'อ่านไม่สำเร็จ: ' + ((e && (e.message || e.code)) || e); }
       refreshPageData();
@@ -306,14 +307,51 @@ function parseReceiptText(text) {
   j.category = '';
   return j;
 }
-function ocrGuessAccount(cat, vendor, items) {
-  var txt = [cat, vendor].concat((items || []).map(function(x) { return x.name; })).join(' ');
-  var list = accountsFor('supplier');
-  var hit = list.find(function(a) { return a.name && txt.indexOf(a.name.replace(/^ค่า/, '')) >= 0; });
-  if (hit) return hit.code;
-  var map = [[/น้ำมัน|ปตท|PTT|บางจาก|เชลล์|Shell|Caltex/i, /น้ำมัน|เดินทาง|พาหนะ/], [/เช่า/, /เช่า/], [/ไฟฟ้า|ประปา|ค่าน้ำ(?!มัน)|โทรศัพท์|อินเทอร์เน็ต|\bAIS\b|\bTrue\b|\bDTAC\b/i, /สาธารณูปโภค|ไฟฟ้า|โทรศัพท์/], [/อาหาร|เครื่องดื่ม|กาแฟ|ร้านอาหาร/, /รับรอง|อาหาร/], [/เครื่องเขียน|กระดาษ|หมึก|สำนักงาน/, /วัสดุ|สำนักงาน/]];
-  for (var i = 0; i < map.length; i++) if (map[i][0].test(txt)) { var a = list.find(function(x) { return map[i][1].test(x.name); }); return a ? a.code : ''; }
-  return '';
+// Rank against the company's own expense accounts; descriptions outrank vendors.
+function ocrAccountSuggestions(cat, vendor, items, rawText) {
+  var list = accountsFor('supplier'), found = {};
+  var rules = [
+    [/โทรศัพท์|ค่าโทร|มือถือ|แพ็กเกจ|telephone|mobile|\bAIS\b|\bDTAC\b/i, [/โทรศัพท์|สื่อสาร/, /สาธารณูปโภค/], 'ค่าโทรศัพท์'],
+    [/อินเทอร์เน็ต|อินเตอร์เน็ต|internet|broadband|wifi/i, [/อินเทอร์เน็ต|อินเตอร์เน็ต/, /สื่อสาร|โทรศัพท์/, /สาธารณูปโภค/], 'ค่าอินเทอร์เน็ต'],
+    [/ค่าไฟ|ไฟฟ้า|electricity/i, [/ไฟฟ้า/, /สาธารณูปโภค/], 'ค่าไฟฟ้า'],
+    [/ค่าน้ำ(?!มัน)|ประปา|water bill/i, [/ประปา|ค่าน้ำ(?!มัน)/, /สาธารณูปโภค/], 'ค่าน้ำประปา'],
+    [/น้ำมัน|ปตท|\bPTT\b|บางจาก|Shell|Caltex|fuel/i, [/น้ำมัน/, /เดินทาง|พาหนะ/], 'ค่าน้ำมัน'],
+    [/ค่าเช่า|rent(?:al)?/i, [/เช่า/], 'ค่าเช่า'],
+    [/อาหาร|เครื่องดื่ม|กาแฟ|restaurant|coffee/i, [/อาหาร|เครื่องดื่ม/, /รับรอง/], 'ค่าอาหารและเครื่องดื่ม'],
+    [/เครื่องเขียน|กระดาษ|หมึกพิมพ์|วัสดุสำนักงาน|stationery/i, [/วัสดุสำนักงาน|เครื่องเขียน/, /วัสดุ/], 'วัสดุสำนักงาน'],
+    [/ค่าเดินทาง|แท็กซี่|taxi|ค่าทางด่วน|ค่าที่พัก|โรงแรม/i, [/เดินทาง|พาหนะ/, /ที่พัก/], 'ค่าเดินทาง'],
+    [/ซ่อม|บำรุงรักษา|repair|maintenance/i, [/ซ่อม|บำรุง/], 'ค่าซ่อมบำรุง'],
+    [/โฆษณา|advertising/i, [/โฆษณา|การตลาด/], 'ค่าโฆษณา'],
+    [/ค่าธรรมเนียม|bank fee/i, [/ธรรมเนียม/], 'ค่าธรรมเนียม']
+  ];
+  var sources = [[cat || '', 100, 'หมวดที่อ่านได้'], [(items || []).map(function(x) { return x.name || ''; }).filter(function(n) { return !/^(ค่าใช้จ่ายตามเอกสาร|ค่าบริการ)$/.test(n); }).join(' '), 90, 'รายการในเอกสาร'], [rawText || '', 60, 'ข้อความ OCR'], [vendor || '', 40, 'ชื่อผู้ขาย']];
+  function add(a, score, reason) { if (!found[a.code] || found[a.code].score < score) found[a.code] = { code: a.code, name: a.name, score: score, reason: reason }; }
+  sources.forEach(function(src) {
+    if (!src[0]) return;
+    // Raw text includes buyer addresses. Only category/items may directly match names.
+    if (src[1] >= 90) list.forEach(function(a) {
+      var name = String(a.name || '').replace(/^ค่า/, '').trim();
+      if (name.length >= 4 && !/^(ใช้จ่าย|บริการ|อื่นๆ|อื่น ๆ)$/.test(name) && src[0].indexOf(name) >= 0) add(a, src[1] + 5, src[2] + 'ตรงกับ ' + a.name);
+    });
+    rules.forEach(function(rule) {
+      if (!rule[0].test(src[0])) return;
+      for (var i = 0; i < rule[1].length; i++) {
+        var matches = list.filter(function(a) { return rule[1][i].test(a.name || ''); });
+        if (matches.length) { matches.forEach(function(a) { add(a, src[1] - i * 2, src[2] + 'ระบุ' + rule[2]); }); break; }
+      }
+    });
+  });
+  return Object.keys(found).map(function(k) { return found[k]; }).sort(function(a, b) { return b.score - a.score || String(a.code).localeCompare(String(b.code)); }).slice(0, 3);
+}
+function ocrGuessAccount(cat, vendor, items, rawText) {
+  var suggestions = ocrAccountSuggestions(cat, vendor, items, rawText);
+  // Ambiguous recommendations remain suggestions until the user chooses.
+  return suggestions.length && (!suggestions[1] || suggestions[0].score > suggestions[1].score) ? suggestions[0].code : '';
+}
+function ocrAccountHint(d, rawText, i) {
+  var suggestions = ocrAccountSuggestions(d.category, d.vendorName, d.items, rawText);
+  if (!suggestions.length) return '<span class="small muted">ยังไม่มีข้อมูลพอแนะนำบัญชี เลือกบัญชีค่าใช้จ่ายเองได้</span>';
+  return '<div class="small muted">บัญชีที่แนะนำ (เลือกเปลี่ยนได้)</div>' + suggestions.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(a.reason) + '</div>'; }).join('');
 }
 async function ocrCreate(i, btn) {
   var it = ocr.items[i], d = it.data; if (!d || it.docId) return;
