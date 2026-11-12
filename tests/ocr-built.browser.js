@@ -12,18 +12,37 @@ const assert=require('node:assert/strict');
    await page.route('**/*',r=>r.request().url()==='http://127.0.0.1/'?r.fulfill({contentType:'text/html; charset=utf-8',body:html}):r.abort());
    await page.goto('http://127.0.0.1/');await page.waitForFunction(()=>typeof go==='function' && typeof STORE==='object');
    await page.evaluate(()=>{
+    STORE.contacts.push({_id:'s1',name:'บริษัท ผู้ขายทดสอบ จำกัด',entity:'company',kind:'supplier',taxId:'0107561000013',branch:'00056',address:'ที่อยู่บริษัท'},{_id:'s2',name:'นาย ผู้ขายทดสอบ',entity:'person',kind:'supplier',taxId:'1234567890123',branch:'',address:'ที่อยู่บุคคล'});
     STORE.accounts.push({code:'5360',name:'ค่าน้ำมัน',accType:'expense',type:'expense'});
     STORE.documents.push({_id:'av1',type:'advance',party:'พนักงาน',date:'2026-10-01',total:2000,extra:{advAcc:'1150'}});
     go('accounting','receiptCapture');ocr.items=[{name:'fuel.jpg',data:{kind:'expense',vendorName:'บริษัท ปตท.',vendorTaxId:'0107561000013',vendorBranch:'00056',docNo:'145479436610120364',items:[{name:'DIESEL B7',qty:1,price:934.58}],vatMode:'exclusive'}}];refreshPageData();
    });
    for(const viewport of [{width:1534,height:959},{width:390,height:844}]){
     await page.setViewportSize(viewport);
-    assert.ok(await page.getByText('รุ่น OCR 2026.11.12.5',{exact:true}).isVisible());
+    assert.ok(await page.getByText('รุ่น OCR 2026.11.12.6',{exact:true}).isVisible());
     assert.ok(await page.locator('[data-ocrvendoradd="0"]').isVisible());
     assert.ok(await page.locator('[data-ocr="0:vendorBranch"]').isVisible());
     assert.ok(await page.locator('[data-ocracc="0:5360"]').isVisible());
   assert.equal(await page.getByRole('link',{name:'ค้น VAT ที่เว็บกรมสรรพากร'}).count(),0);
    }
+   assert.equal(await page.locator('[data-ocr="0:vendorEntity"]').isVisible(),false,'entity type starts inside the closed vendor menu');
+   await page.locator('[data-ocrvendor="0"]').click();
+   assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('aria-expanded'),'true');
+   assert.ok(await page.locator('[data-ocrvendorpick="0:s1"]').isVisible(),'click opens all suppliers even when input has an OCR name');
+   assert.ok(await page.locator('[data-ocr="0:vendorEntity"]').isVisible());
+   await page.locator('[data-ocrvendorpick="0:s1"]').click();
+   assert.equal(await page.locator('[data-ocrvendor="0"]').inputValue(),'บริษัท ผู้ขายทดสอบ จำกัด');
+   assert.equal(await page.locator('[data-ocr="0:vendorAddress"]').inputValue(),'ที่อยู่บริษัท');
+   await page.locator('[data-ocrvendortoggle="0"]').click();
+   await page.locator('[data-ocrvendorpick="0:s2"]').click();
+   assert.equal(await page.locator('[data-ocr="0:vendorBranch"]').getAttribute('required'),null);
+   await page.locator('[data-ocrvendor="0"]').fill('ชื่อผู้ขายใหม่');
+   assert.equal(await page.locator('[data-ocrvendorpick="0:s1"]').isVisible(),false);
+   await page.locator('[data-ocrvendor="0"]').press('Escape');
+   assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('aria-expanded'),'false');
+   await page.locator('[data-ocrvendor="0"]').click();
+   assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('aria-expanded'),'true');
+   await page.locator('[data-ocrvendorpick="0:s1"]').click();
    await page.locator('[data-ocr="0:kind"]').selectOption('advance');
    await page.locator('[data-ocr="0:advanceId"]').selectOption('av1');
    assert.ok(await page.locator('[data-ocrvendoradd="0"]').isVisible());

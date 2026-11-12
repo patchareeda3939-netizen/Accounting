@@ -1,6 +1,6 @@
 
 /* ================= Document reading (OCR via Claude) — accounting:receiptCapture ================= */
-var OCR_UI_VERSION = '2026.11.12.5';
+var OCR_UI_VERSION = '2026.11.12.6';
 var ocr = { items: [], busy: false };
 function ocrEngine() { try { return localStorage.getItem('psm_ocr') || 'tess'; } catch (e) { return 'tess'; } }
 var SAMPLE = null;
@@ -127,18 +127,26 @@ async function ocrLookupVendor(i, btn) {
   } finally { clearTimeout(timer); it.vendorBusy = false; btn.disabled = false; refreshPageData(); }
 }
 function ocrVendorOption(c) { return c.name + ' · ' + (c.taxId || '') + ' · ' + (c.branch || 'ไม่ระบุสาขา'); }
-function ocrVendorNameChanged(i, value) {
-  var it = ocr.items[i]; if (!it || !it.data || it.docId) return;
-  var vendors = STORE.contacts.filter(function(c) { return c.kind !== 'customer'; });
-  var exact = vendors.find(function(c) { return ocrVendorOption(c) === value; });
-  var names = vendors.filter(function(c) { return c.name === value; });
-  var match = exact || (names.length === 1 ? names[0] : null);
-  if (match) ocrUseVendor(i, match._id);
-  else it.data.vendorName = value;
+function ocrVendorCombo(d, i) {
+  return '<div class="field"><label for="ocrVendorName-' + i + '">ผู้ขาย</label><div class="ocr-vendor-combo" data-ocrcombo="' + i + '"><div class="ocr-vendor-entry"><input id="ocrVendorName-' + i + '" data-ocr="' + i + ':vendorName" data-ocrvendor="' + i + '" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ocrVendorPanel-' + i + '" value="' + esc(d.vendorName || '') + '" placeholder="เลือกผู้ขายเดิม หรือพิมพ์ชื่อใหม่" autocomplete="off"><button type="button" class="btn btn-outline" data-ocrvendortoggle="' + i + '" aria-label="เปิดรายชื่อผู้ขาย" aria-expanded="false">▾</button></div><div id="ocrVendorPanel-' + i + '" class="ocr-vendor-panel" hidden><label>ประเภทผู้ขาย<select data-ocr="' + i + ':vendorEntity"><option value="company"' + (ocrVendorEntity(d) === 'company' ? ' selected' : '') + '>นิติบุคคล</option><option value="person"' + (ocrVendorEntity(d) === 'person' ? ' selected' : '') + '>บุคคลธรรมดา</option></select></label><div role="listbox" aria-label="รายชื่อผู้ขาย">' + STORE.contacts.filter(function(c) { return c.kind !== 'customer'; }).map(function(c) { return '<button type="button" role="option" class="ocr-vendor-option" data-ocrvendorpick="' + i + ':' + esc(c._id) + '">' + esc(ocrVendorOption(c) + ' · ' + (c.entity === 'person' ? 'บุคคลธรรมดา' : 'นิติบุคคล')) + '</button>'; }).join('') + '</div><div class="small muted" data-ocrvendorempty>พิมพ์ชื่อใหม่ได้ หรือเลือกผู้ขายจากรายชื่อ</div></div></div></div>';
+}
+function bindOcrVendorCombos(c) {
+  c.querySelectorAll('[data-ocrcombo]').forEach(function(combo) {
+    var i = Number(combo.dataset.ocrcombo), input = combo.querySelector('[data-ocrvendor]'), toggle = combo.querySelector('[data-ocrvendortoggle]'), panel = combo.querySelector('.ocr-vendor-panel');
+    function show(open) { panel.hidden = !open; input.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-expanded', String(open)); }
+    function filter(q) { combo.querySelectorAll('[data-ocrvendorpick]').forEach(function(b) { b.hidden = b.textContent.toLowerCase().indexOf(q.toLowerCase()) < 0; }); }
+    input.onfocus = function() { filter(''); show(true); };
+    input.onclick = function() { if (panel.hidden) { filter(''); show(true); } };
+    input.oninput = function() { ocr.items[i].data.vendorName = input.value; filter(input.value); show(true); };
+    input.onkeydown = function(e) { if (e.key === 'ArrowDown') { e.preventDefault(); show(true); var first = Array.from(combo.querySelectorAll('[data-ocrvendorpick]')).find(function(b) { return !b.hidden; }); if (first) first.focus(); } };
+    toggle.onclick = function() { var open = panel.hidden; filter(''); show(open); };
+    combo.onkeydown = function(e) { if (e.key === 'Escape') { e.preventDefault(); input.focus(); show(false); } };
+    combo.onfocusout = function() { setTimeout(function() { if (!combo.contains(document.activeElement)) show(false); }, 0); };
+    combo.querySelectorAll('[data-ocrvendorpick]').forEach(function(b) { b.onclick = function() { var parts = b.dataset.ocrvendorpick.split(':'); ocrUseVendor(Number(parts[0]), parts.slice(1).join(':')); }; });
+  });
 }
 function ocrVendorFields(d, it, i, v) {
-  return '<div class="field"><label>ประเภทผู้ขาย</label><select data-ocr="' + i + ':vendorEntity"><option value="company"' + (ocrVendorEntity(d) === 'company' ? ' selected' : '') + '>นิติบุคคล (ต้องระบุสาขาเมื่อค้นหา)</option><option value="person"' + (ocrVendorEntity(d) === 'person' ? ' selected' : '') + '>บุคคลธรรมดา (ไม่บังคับสาขา)</option></select></div>' +
-    '<div class="field"><label for="ocrVendorName-' + i + '">ผู้ขาย</label><input id="ocrVendorName-' + i + '" list="ocrVendorList-' + i + '" data-ocr="' + i + ':vendorName" data-ocrvendor="' + i + '" value="' + esc(d.vendorName || '') + '" placeholder="เลือกผู้ขายเดิม หรือพิมพ์ชื่อใหม่" autocomplete="off"><datalist id="ocrVendorList-' + i + '">' + STORE.contacts.filter(function(c) { return c.kind !== 'customer'; }).map(function(c) { return '<option value="' + esc(ocrVendorOption(c)) + '"></option>'; }).join('') + '</datalist></div><div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
+  return ocrVendorCombo(d, i) + '<div class="field"><label>เลขผู้เสียภาษีผู้ขาย</label>' + v('vendorTaxId', d.vendorTaxId) + '</div>' +
     '<div class="field"><label for="ocrVendorBranch-' + i + '">สาขาผู้ขาย (5 หลัก)</label><input id="ocrVendorBranch-' + i + '" data-ocr="' + i + ':vendorBranch" value="' + esc(ocrBranchInput(d)) + '" inputmode="numeric" pattern="[0-9]{5}" minlength="5" maxlength="5" placeholder="00000 = สำนักงานใหญ่"' + (ocrVendorEntity(d) === 'company' ? ' required' : '') + '></div><div class="field"><label>ที่อยู่ผู้ขาย</label>' + v('vendorAddress', d.vendorAddress) + '</div>' +
     '<div class="field"><div><button type="button" class="btn btn-outline" data-ocrrd="' + i + '"' + (it.vendorBusy ? ' disabled' : '') + '>ค้นชื่อ/ที่อยู่จาก Tax ID</button> <button type="button" class="btn btn-outline" data-ocrvendoradd="' + i + '">+ เพิ่มรายชื่อผู้ขาย</button></div><span class="small muted">ค้นด้วยเลขผู้เสียภาษี 13 หลัก · นิติบุคคลต้องกรอกสาขา 5 หลัก เช่น 00056 หรือ 00000 (สำนักงานใหญ่) · บุคคลธรรมดาไม่บังคับสาขา · ดึงอัตโนมัติผ่าน eservice กรมสรรพากร</span>' + (it.vendorLookup ? '<span class="small muted">' + esc(it.vendorLookup) + '</span>' : '') + '</div>';
 }
@@ -184,7 +192,7 @@ function bindOcr() {
   }
   var c = byId('pageData'); if (!c) return;
   c.querySelectorAll('[data-ocr]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocr.split(':'), it = ocr.items[Number(s[0])]; it.data[s[1]] = el.value; if (/^(kind|vatMode|whtRate|vendorEntity)$/.test(s[1])) { el.onchange = null; refreshPageData(); } }; });
-  c.querySelectorAll('[data-ocrvendor]').forEach(function(el) { el.onchange = function changeVendor() { el.onchange = null; ocrVendorNameChanged(Number(el.dataset.ocrvendor), el.value); if (document.contains(el)) el.onchange = changeVendor; }; });
+  bindOcrVendorCombos(c);
   c.querySelectorAll('[data-ocr$=":vendorBranch"]').forEach(function(el) { el.oninput = function() { el.value = el.value.replace(/\D/g, '').slice(0, 5); var i = Number(el.dataset.ocr.split(':')[0]); ocr.items[i].data.vendorBranch = el.value; el.setCustomValidity(el.value && el.value.length !== 5 ? 'กรอกสาขาเป็นตัวเลข 5 หลักพอดี' : ''); }; });
   [['data-ocrrd','ocrrd',ocrLookupVendor], ['data-ocrvendoradd','ocrvendoradd',ocrSaveVendor]].forEach(function(action) {
     c.querySelectorAll('[' + action[0] + ']').forEach(function(b) { b.onclick = async function() { try { await action[2](Number(b.dataset[action[1]]), b); } catch (e) { showToast(e.message); } }; });

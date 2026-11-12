@@ -33,7 +33,7 @@ let rdRows=[row];
   await branchInput.fill('');await branchInput.pressSequentially('a00b0567');
   assert.equal(await branchInput.inputValue(),'00056');
   assert.equal(await page.locator('select[data-ocrvendor]').count(),0);
-  assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('list'),'ocrVendorList-0');
+  assert.equal(await page.locator('[data-ocrvendor="0"]').getAttribute('role'),'combobox');
   await page.locator('[data-ocrrd="0"]').click();
   await page.waitForFunction(()=>window.lastToast || ocr.items[0].data.vendorName==='บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)',{},{timeout:25000});
   assert.equal(await page.evaluate(()=>window.lastToast),undefined);
@@ -44,9 +44,9 @@ let rdRows=[row];
   await page.waitForFunction(()=>STORE.contacts.length===1);
   await page.locator('[data-ocrvendoradd="0"]').click();assert.equal(await page.evaluate(()=>STORE.contacts.length),1);
   await page.locator('[data-ocr="0:vendorName"]').fill('เปลี่ยนชื่อ');await page.locator('[data-ocr="0:vendorName"]').dispatchEvent('change');
-  const choice=await page.locator('#ocrVendorList-0 option').first().getAttribute('value');
-  await page.locator('[data-ocrvendor="0"]').fill(choice);
-  await page.locator('[data-ocrvendor="0"]').dispatchEvent('change');
+  await page.locator('[data-ocrvendor="0"]').press('Escape');
+  await page.locator('[data-ocrvendortoggle="0"]').click();
+  await page.locator('[data-ocrvendorpick="0:vendor0"]').click();
   assert.equal(await page.locator('[data-ocr="0:vendorName"]').inputValue(),'บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)');
   if(!process.env.LIVE_RD){
    rdRows=[{...row,branchNo:'สำนักงานใหญ่'},row];
@@ -61,6 +61,7 @@ let rdRows=[row];
   }
   if(!process.env.LIVE_RD){
    rdRows=[{...row,branchNo:'สำนักงานใหญ่',titleCode:'นาย',firstName:'ทดสอบ ระบบ'}];
+   await page.locator('[data-ocrvendortoggle="0"]').click();
    await page.locator('[data-ocr="0:vendorEntity"]').selectOption('person');
    await page.locator('[data-ocr="0:vendorBranch"]').fill('');
    await page.locator('[data-ocrrd="0"]').click();
