@@ -1,6 +1,9 @@
 /* ---- Product / service form (QuickBooks style) ---- */
 var KIND_NEW_TITLE = { goods:'เพิ่มรายการสินค้าคงคลังใหม่', service:'เพิ่มบริการใหม่', noninv:'เพิ่มของไม่นับสต็อกใหม่', bundle:'เพิ่มรวมชุดใหม่' };
 var KIND_NOUN = { goods:'สินค้านี้', service:'บริการนี้', noninv:'สินค้านี้', bundle:'ชุดนี้' };
+function productWhtFields(p) {
+  return '<div class="field"><label><input id="p_whtEnabled" type="checkbox" style="width:auto"' + (p.whtEnabled ? ' checked' : '') + '> หัก ณ ที่จ่ายอัตโนมัติเมื่อซื้อสินค้า/บริการนี้</label></div><div class="field-row"><div class="field"><label for="p_whtRate">อัตราหัก ณ ที่จ่าย (%)</label><input id="p_whtRate" type="number" min="0.01" max="100" step="any" value="' + esc(p.whtRate == null ? 3 : p.whtRate) + '"></div><div class="field"><label for="p_whtMin">ยอดขั้นต่ำก่อน VAT (บาท)</label><input id="p_whtMin" type="number" min="0" step="0.01" value="' + esc(p.whtMin == null ? 1000 : p.whtMin) + '"></div></div><p class="small muted">รวมยอดหลังส่วนลดของสินค้า/บริการเดียวกันในเอกสาร เมื่อยอดก่อน VAT ถึงขั้นต่ำ จึงหักตามอัตราที่ตั้งไว้</p>';
+}
 function openProductForm(rec, defaults) {
   var p = Object.assign({ kind:'goods', sells: true }, defaults || {}, rec || {});
   if (p.buys == null) p.buys = p.cost != null && p.cost !== '' ? true : (p.kind === 'goods');
@@ -15,7 +18,7 @@ function openProductForm(rec, defaults) {
     return '<select id="' + id + '">' + names.map(function(n) { var a = list.find(function(x) { return x.name === n; }); return '<option value="' + esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + esc((a ? a.code + ' ' : '') + n) + '</option>'; }).join('') + '</select>';
   };
   var taxSel = function(id, cur) { return '<select id="' + id + '">' + [['','— ไม่ระบุ —'],['vat7','VAT 7%'],['vat0','VAT 0%'],['exempt','ยกเว้นภาษี']].map(function(o) { return '<option value="' + o[0] + '"' + ((cur || '') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>'; };
-  var sups = STORE.contacts.filter(function(c) { return c.kind === 'supplier'; });
+  var sups = STORE.contacts.filter(function(c) { return c.kind === 'supplier' || c.kind === 'both'; });
   var sec = function(id, title, inner) { return '<section class="pf-sec" id="' + id + '"><button type="button" class="pf-sec-h" onclick="this.parentNode.classList.toggle(\'closed\')"><span>' + title + '</span><span class="pf-chev">⌃</span></button><div class="pf-sec-b">' + inner + '</div></section>'; };
   var basic = '<div class="pf-basic"><div class="pf-basic-l">' +
     '<div class="field"><label for="p_name">ชื่อ*</label><input id="p_name" value="' + esc(p.name || '') + '"></div>' +
@@ -42,7 +45,7 @@ function openProductForm(rec, defaults) {
     '<div class="field"><label for="p_ptax">ภาษีจัดซื้อ</label>' + taxSel('p_ptax', p.purchaseTax) + '</div>' +
     '<div class="field-row"><div class="field"><label for="p_sup">ซัพพลายเออร์ที่ต้องการ</label><select id="p_sup"><option value="">เลือกซัพพลายเออร์ที่ชอบ</option>' + sups.map(function(c) { return '<option' + (p.supplier === c.name ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select></div>' +
     '<div class="field"><label for="p_expacc">บัญชีค่าใช้จ่าย*</label>' + accSel('p_expacc', ['cogs','expense'], p.expenseAccount, p.kind === 'goods' ? 'ต้นทุนขาย' : 'การซื้อ') + '</div></div></div>';
-  var body = sec('pfBasic', 'ข้อมูลพื้นฐาน', basic) + sec('pfSell', 'การขาย', sell) + sec('pfBuy', 'การจัดซื้อ', buy) + '<div class="form-error" id="formError" hidden></div>';
+  var body = sec('pfBasic', 'ข้อมูลพื้นฐาน', basic) + sec('pfSell', 'การขาย', sell) + sec('pfBuy', 'การจัดซื้อ', buy + productWhtFields(p)) + '<div class="form-error" id="formError" hidden></div>';
   var buttons = [];
   if (rec) buttons.push(confirmDeleteBtn(function(el) { runSave(el, async function() { await delRec('products', rec._id); showToast('ลบแล้ว'); closeModal(); }); }));
   buttons.push({ label:'ยกเลิก', left: !rec, onClick: function() { closeModal(); } });
@@ -78,7 +81,9 @@ function saveProductForm(btn, rec, again) {
   if (!name) { err.textContent = 'กรุณาระบุชื่อ'; err.hidden = false; return; }
   if (STORE.products.some(function(x) { return x.name === name && (!rec || x._id !== rec._id); })) { err.textContent = 'มีชื่อ "' + name + '" อยู่แล้ว'; err.hidden = false; return; }
   var k = v('p_kind'), sells = byId('p_sells').checked, buys = byId('p_buys').checked && k !== 'bundle';
-  var out = { name: name, kind: k, sku: v('p_sku'), category: v('p_cat') === '__new' ? '' : v('p_cat'), unit: v('p_unit') === '__new' ? '' : v('p_unit'), image: window._pfImg || '',
+  var whtEnabled = byId('p_whtEnabled').checked, whtRate = num('p_whtRate'), whtMin = num('p_whtMin');
+  if (whtEnabled && (!(whtRate > 0 && whtRate <= 100) || whtMin == null || !isFinite(whtMin) || whtMin < 0)) { err.textContent = 'ระบุอัตราหัก ณ ที่จ่ายมากกว่า 0 ไม่เกิน 100 และยอดขั้นต่ำตั้งแต่ 0'; err.hidden = false; return; }
+  var out = { whtEnabled:whtEnabled, whtRate:whtEnabled ? whtRate : 0, whtMin:whtEnabled ? round2(whtMin) : 0, name: name, kind: k, sku: v('p_sku'), category: v('p_cat') === '__new' ? '' : v('p_cat'), unit: v('p_unit') === '__new' ? '' : v('p_unit'), image: window._pfImg || '',
     sells: sells, desc: v('p_desc'), price: sells ? num('p_price') : null, incomeAccount: v('p_incacc'), priceIncTax: byId('p_priceInc').checked, salesTax: v('p_stax'),
     buys: buys, purchaseDesc: v('p_pdesc'), cost: buys ? num('p_cost') : null, costIncTax: byId('p_costInc').checked, purchaseTax: v('p_ptax'), supplier: v('p_sup'), expenseAccount: v('p_expacc'),
     openingQty: k === 'goods' ? num('p_qty') : null, asOf: k === 'goods' ? v('p_asof') : '', reorderPoint: k === 'goods' ? num('p_rp') : null, invAccount: k === 'goods' ? v('p_invacc') : '', bundleItems: k === 'bundle' ? v('p_bundle') : '' };

@@ -1,0 +1,45 @@
+const {chromium}=require('playwright');const fs=require('node:fs');const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({...process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{},args:['--no-sandbox']});
+ try{
+ const p=await browser.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));
+ const html=fs.readFileSync('dist/index.html','utf8').replace(/^var FIREBASE_CONFIG = (?:null|\{[\s\S]*?\n\});$/m,'var FIREBASE_CONFIG = null;').replace(/^var FIREBASE_EMULATOR_HOST = [^\n]*;$/m,'var FIREBASE_EMULATOR_HOST = null;');
+ await p.route('**/*',r=>r.request().url()==='http://127.0.0.1/'?r.fulfill({contentType:'text/html; charset=utf-8',body:html}):r.abort());
+ await p.goto('http://127.0.0.1/');await p.waitForFunction(()=>typeof go==='function'&&typeof STORE==='object');
+ await p.evaluate(()=>openProductForm(null,{kind:'service',buys:true,sells:false}));
+ await p.locator('#p_name').fill('ค่าโทรศัพท์');await p.locator('#p_cost').fill('1000');
+ await p.locator('#p_whtEnabled').check();await p.locator('#p_whtRate').fill('101');
+ await p.locator('#modalFoot').getByRole('button',{name:'บันทึกและปิด',exact:true}).click();
+ assert.ok((await p.locator('#formError').innerText()).includes('อัตราหัก'));
+ await p.locator('#p_whtRate').fill('3');await p.locator('#p_whtMin').fill('1000');
+ await p.locator('#modalFoot').getByRole('button',{name:'บันทึกและปิด',exact:true}).click();
+ await p.waitForFunction(()=>STORE.products.some(x=>x.name==='ค่าโทรศัพท์'&&x.whtEnabled));
+ await p.evaluate(()=>openDocForm('expense',null,{party:'บริษัท ผู้ขาย',items:[{name:'ค่าโทรศัพท์',qty:1,price:1000}],vatMode:'exclusive'}));
+ assert.equal(await p.locator('#f_wht').inputValue(),'product');
+ let t=await p.evaluate(()=>computeTotals());assert.equal(t.wht,30);assert.equal(t.vat,70);assert.equal(t.net,1040);
+ const calc=async(items,mode='exclusive')=>p.evaluate(({items,mode})=>{form.items=items;byId('f_vat').value=mode;return computeTotals();},{items,mode});
+ const phone=price=>({name:'ค่าโทรศัพท์',qty:1,price});
+ assert.equal((await calc([phone(999.99)])).wht,0);
+ assert.equal((await calc([phone(1070)],'inclusive')).wht,30);
+ assert.equal((await calc([phone(1000)],'inclusive')).wht,0);
+ assert.equal((await calc([phone(600),phone(600)])).wht,36);
+ assert.equal((await calc([phone(600),{name:'อื่นๆ',qty:1,price:600}])).wht,0);
+ t=await calc([phone(1000),{name:'อื่นๆ',qty:1,price:2000}]);assert.equal(t.wht,30);assert.equal(t.whtBase,1000);
+ assert.equal((await calc([{...phone(1000),discount:1}])).wht,0);
+ await p.evaluate(()=>STORE.products.push({_id:'rent',name:'ค่าเช่า',whtEnabled:true,whtRate:5,whtMin:0}));
+ t=await calc([phone(1000),{name:'ค่าเช่า',qty:1,price:500}]);assert.equal(t.wht,55);assert.equal(t.whtBase,1500);
+ await p.locator('#f_wht').selectOption('0');assert.equal((await p.evaluate(()=>computeTotals())).wht,0);
+ await p.locator('#f_wht').selectOption('product');await calc([phone(1000),{name:'อื่นๆ',qty:1,price:2000}]);
+ await p.locator('#modalFoot').getByRole('button',{name:'บันทึก',exact:true}).click();
+ await p.waitForFunction(()=>STORE.documents.some(d=>d.type==='expense'&&d.whtMode==='product'));
+ const saved=await p.evaluate(()=>STORE.documents.find(d=>d.type==='expense'&&d.whtMode==='product'));
+ assert.equal(saved.wht,30);assert.equal(saved.whtBase,1000);assert.equal(saved.items[0].whtRule.rate,3);
+ await p.evaluate(id=>{STORE.products.find(x=>x.name==='ค่าโทรศัพท์').whtRate=5;STORE.products.push({_id:'other',name:'อื่นๆ',whtEnabled:true,whtRate:5,whtMin:0});openDocForm('expense',STORE.documents.find(d=>d._id===id));},saved._id);
+ assert.equal((await p.evaluate(()=>computeTotals())).wht,30,'saved document preserves historical product rule');
+ assert.equal((await p.evaluate(()=>whtCerts().find(c=>c.d.whtMode==='product'))).base,1000);
+ await p.evaluate(()=>{closeModal();go('accounting','receiptCapture');ocr.items=[{name:'test.jpg',data:{kind:'expense',vendorName:'บริษัท ผู้ขาย',vendorEntity:'company',vendorTaxId:'0107561000013',vendorBranch:'00056',items:[{name:'ค่าโทรศัพท์',qty:1,price:1000}],vatMode:'exclusive',whtMode:'product'}}];refreshPageData();});
+ assert.equal(await p.evaluate(()=>ocrTotals(ocr.items[0].data).wht),50);
+ await p.locator('[data-ocr="0:whtMode"]').selectOption('manual');assert.equal(await p.evaluate(()=>ocrTotals(ocr.items[0].data).wht),0);
+ assert.deepEqual(errors,[]);console.log('PASS product WHT: product editor, threshold/VAT/discounts, grouping, mixed items/rates, manual override, persistence/snapshot, tax certificate base and OCR');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

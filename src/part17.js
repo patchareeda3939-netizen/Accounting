@@ -164,12 +164,12 @@ function ocrData() {
         ocrVendorFields(d, it, i, v) +
         '<div class="field"><label>เลขที่ใบกำกับ/บิล</label>' + v('docNo', d.docNo) + '</div><div class="field"><label>วันที่</label>' + v('date', d.date, 'date') + '</div>' +
         '<div class="field"><label>ราคาในเอกสาร</label><select data-ocr="' + i + ':vatMode"><option value="exclusive"' + (d.vatMode === 'exclusive' ? ' selected' : '') + '>ยังไม่รวม VAT</option><option value="inclusive"' + (d.vatMode === 'inclusive' ? ' selected' : '') + '>รวม VAT แล้ว</option><option value="none"' + (d.vatMode === 'none' ? ' selected' : '') + '>ไม่มี VAT</option></select></div>' +
-        '<div class="field"><label>หัก ณ ที่จ่าย (%)</label>' + v('whtRate', d.whtRate || 0, 'number') + '</div></div>' +
+        '<div class="field"><label>หัก ณ ที่จ่าย</label><select data-ocr="' + i + ':whtMode"><option value="manual"' + (d.whtMode !== 'product' ? ' selected' : '') + '>กำหนดอัตราเอง</option><option value="product"' + (d.whtMode === 'product' ? ' selected' : '') + '>อัตโนมัติตามสินค้า/บริการ</option></select>' + (d.whtMode !== 'product' ? v('whtRate', d.whtRate || 0, 'number') : '<span class="small muted">ใช้กฎสินค้า/บริการที่ชื่อตรงกัน คำนวณจากยอดก่อน VAT</span>') + '</div></div>' +
         '<table class="data-table ocr-items"><thead><tr><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคา/หน่วย</th><th class="r">รวม</th><th></th></tr></thead><tbody>' +
         (d.items || []).map(function(r, k) { return '<tr><td><input data-ocri="' + i + ':' + k + ':name" value="' + esc(r.name) + '"></td><td class="r"><input type="number" step="any" data-ocri="' + i + ':' + k + ':qty" value="' + esc(r.qty) + '" style="width:70px"></td><td class="r"><input type="number" step="any" data-ocri="' + i + ':' + k + ':price" value="' + esc(r.price) + '" style="width:110px"></td><td class="r">' + fmtMoney((Number(r.qty) || 0) * (Number(r.price) || 0)) + '</td><td><button type="button" class="icon-btn" data-ocrdel="' + i + ':' + k + '" aria-label="ลบ">✕</button></td></tr>'; }).join('') +
         '</tbody></table><button type="button" class="linkish" data-ocradd="' + i + '">+ เพิ่มรายการ</button>';
       var t = ocrTotals(d);
-      h += (it.rawText ? '<details class="ocr-raw"><summary>ข้อความที่อ่านได้ (OCR)</summary><pre>' + esc(it.rawText) + '</pre></details>' : '') + '<div class="ocr-sum">ก่อน VAT <b>' + fmtMoney(t.subtotal) + '</b> · VAT <b>' + fmtMoney(t.vat) + '</b> · รวม <b>' + fmtMoney(t.total) + '</b>' + (d.total && Math.abs(Number(d.total) - t.total) > 0.05 ? ' <span class="neg-text small">(เอกสารระบุ ' + fmtMoney(d.total) + ')</span>' : '') + '</div>' +
+      h += (it.rawText ? '<details class="ocr-raw"><summary>ข้อความที่อ่านได้ (OCR)</summary><pre>' + esc(it.rawText) + '</pre></details>' : '') + '<div class="ocr-sum">ก่อน VAT <b>' + fmtMoney(t.subtotal) + '</b> · VAT <b>' + fmtMoney(t.vat) + '</b> · รวม <b>' + fmtMoney(t.total) + '</b>' + (t.wht ? ' · หัก ณ ที่จ่าย <b>' + fmtMoney(t.wht) + '</b> · จ่ายสุทธิ <b>' + fmtMoney(t.net) + '</b>' : '') + (d.total && Math.abs(Number(d.total) - t.total) > 0.05 ? ' <span class="neg-text small">(เอกสารระบุ ' + fmtMoney(d.total) + ')</span>' : '') + '</div>' +
         '<div class="toolbar">' + (it.docId ? '<span class="pos-text">✓ สร้างแล้ว</span> <button type="button" class="btn btn-outline" data-ocropen="' + i + '">เปิดเอกสาร</button>' : '<button type="button" class="btn btn-dark" data-ocrsave="' + i + '">สร้างเอกสาร</button>') + '<button type="button" class="btn btn-outline" data-ocrrm="' + i + '">นำออก</button></div></div>';
     } else h += '<div class="ocr-form"><div class="small muted">' + (it.err ? '' : '<span class="ocr-spin"></span> กำลังอ่านเอกสาร…') + '</div>' + (it.err ? '<button type="button" class="btn btn-outline" data-ocrrm="' + i + '">นำออก</button>' : '') + '</div>';
     return h + '</div></div>';
@@ -178,8 +178,8 @@ function ocrData() {
 function ocrTotals(d) {
   var base = round2((d.items || []).reduce(function(s, r) { return s + (Number(r.qty) || 0) * (Number(r.price) || 0); }, 0)), sub = base, vat = 0;
   if (d.vatMode === 'exclusive') vat = round2(base * VAT_RATE); else if (d.vatMode === 'inclusive') { sub = round2(base / (1 + VAT_RATE)); vat = round2(base - sub); }
-  var total = round2(sub + vat), wht = round2(sub * (Number(d.whtRate) || 0) / 100);
-  return { subtotal: sub, vat: vat, total: total, wht: wht, net: round2(total - wht) };
+  var total = round2(sub + vat), autoWht = d.whtMode === 'product', rules = autoWht ? productWhtTotals(d.items, d.vatMode) : null, wht = autoWht ? rules.amount : round2(sub * (Number(d.whtRate) || 0) / 100);
+  return { whtMode:autoWht ? 'product' : 'manual', whtBase:autoWht ? rules.base : sub, whtGroups:autoWht ? rules.groups : [], whtRate:autoWht ? rules.rate : Number(d.whtRate) || 0, subtotal: sub, vat: vat, total: total, wht: wht, net: round2(total - wht) };
 }
 function bindOcr() {
   var eg = byId('ocrEngine'); if (eg && !eg._b) { eg._b = 1; eg.onchange = function() { try { localStorage.setItem('psm_ocr', eg.value); } catch (e) {} }; }
@@ -191,7 +191,7 @@ function bindOcr() {
     drop.addEventListener('drop', function(e) { ocrAddFiles(Array.from(e.dataTransfer.files || [])); });
   }
   var c = byId('pageData'); if (!c) return;
-  c.querySelectorAll('[data-ocr]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocr.split(':'), it = ocr.items[Number(s[0])]; it.data[s[1]] = el.value; if (/^(kind|vatMode|whtRate|vendorEntity)$/.test(s[1])) { el.onchange = null; refreshPageData(); } }; });
+  c.querySelectorAll('[data-ocr]').forEach(function(el) { el.onchange = function() { var s = el.dataset.ocr.split(':'), it = ocr.items[Number(s[0])]; it.data[s[1]] = el.value; if (/^(kind|vatMode|whtRate|whtMode|vendorEntity)$/.test(s[1])) { el.onchange = null; refreshPageData(); } }; });
   bindOcrVendorCombos(c);
   c.querySelectorAll('[data-ocr$=":vendorBranch"]').forEach(function(el) { el.oninput = function() { el.value = el.value.replace(/\D/g, '').slice(0, 5); var i = Number(el.dataset.ocr.split(':')[0]); ocr.items[i].data.vendorBranch = el.value; el.setCustomValidity(el.value && el.value.length !== 5 ? 'กรอกสาขาเป็นตัวเลข 5 หลักพอดี' : ''); }; });
   [['data-ocrrd','ocrrd',ocrLookupVendor], ['data-ocrvendoradd','ocrvendoradd',ocrSaveVendor]].forEach(function(action) {
@@ -298,7 +298,7 @@ async function ocrAddFiles(files) {
         }
         var items = ocrReceiptItems(j, it.rawText || r.text);
         var acc = ocrGuessAccount(j.category, j.vendorName, items, it.rawText);
-        it.data = { vendorEntity:j.vendorEntity === 'person' ? 'person' : 'company', category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
+        it.data = { whtMode:!Number(j.whtRate) && typeof itemWhtRule === 'function' && items.some(function(r) { return itemWhtRule(r); }) ? 'product' : 'manual', vendorEntity:j.vendorEntity === 'person' ? 'person' : 'company', category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
         var knownVendor = ocrVendorMatch(it.data);
         if (knownVendor) Object.assign(it.data, { vendorEntity:knownVendor.entity || it.data.vendorEntity, vendorName:knownVendor.name || it.data.vendorName, vendorTaxId:knownVendor.taxId || it.data.vendorTaxId, vendorBranch:knownVendor.branch || it.data.vendorBranch, vendorAddress:knownVendor.address || it.data.vendorAddress });
         it.status = 'อ่านด้วย ' + via + ' แล้ว ตรวจสอบก่อนกดสร้างเอกสาร';
@@ -513,8 +513,8 @@ async function ocrCreate(i, btn) {
     var extra = { supInvNo: d.docNo, supInvDate: d.date, account: a ? a.code : '', expCategory: a ? a.name : '', attachments: att, note: 'อ่านจากเอกสาร ' + it.file.name, ocr: true };
     Object.assign(extra, payment, { vendorTaxId:ocrTaxId(d.vendorTaxId), vendorBranch:d.vendorBranch || '', vendorAddress:d.vendorAddress || '' });
     var vendorContact = ocrVendorMatch(d);
-    var rec = { type: type, typeLabel: def.label, group:'supplier', contactId:vendorContact && vendorContact._id || '', party: d.vendorName, date: d.date, docNo: nextDocNo(type, d.date), items: def.template === 'itemized' ? d.items.map(function(r) { return { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; }) : null,
-      vatMode: d.vatMode, whtRate: Number(d.whtRate) || 0, subtotal: t.subtotal, vat: t.vat, total: t.total, wht: t.wht, net: t.net, extra: extra, status: def.status ? 'unpaid' : 'done', createdAt: Date.now() };
+    var rec = { type: type, typeLabel: def.label, group:'supplier', contactId:vendorContact && vendorContact._id || '', party: d.vendorName, date: d.date, docNo: nextDocNo(type, d.date), items: def.template === 'itemized' ? d.items.map(function(r) { var row = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (t.whtMode === 'product') row.whtRule = itemWhtRule(r); return row; }) : null,
+      vatMode: d.vatMode, whtMode:t.whtMode, whtBase:t.whtBase, whtGroups:t.whtGroups, whtRate: t.whtRate, subtotal: t.subtotal, vat: t.vat, total: t.total, wht: t.wht, net: t.net, extra: extra, status: def.status ? 'unpaid' : 'done', createdAt: Date.now() };
     it.docId = await addRec('documents', rec);
     if (!it.docId) { var f = STORE.documents.find(function(x) { return x.docNo === rec.docNo; }); it.docId = f && f._id; }
     if (it.docId) d._saved = true;
