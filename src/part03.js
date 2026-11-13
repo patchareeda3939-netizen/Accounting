@@ -145,7 +145,7 @@ var SUBNAV_ITEMS = [
       { key:'salesOrder', label:'ใบสั่งขาย' },
       { key:'products', label:'ผลิตภัณฑ์และบริการ' }
     ] },
-  { key:'customers',  label:'ศูนย์กลางลูกค้า', color:'#2E8B6F', icon:'👥' },
+  { key:'customers',  label:'รายชื่อผู้ซื้อ/ผู้ขาย', color:'#2E8B6F', icon:'👥' },
   { key:'inventory',  label:'สินค้าคงคลัง', color:'#1B2E3A', icon:'📦', children: [
       { key:'overview', label:'ภาพรวม' },
       { key:'stock', label:'สินค้าคงคลัง' },
@@ -1253,10 +1253,10 @@ function journalData() {
 
 /* ---- Contacts ---- */
 function contactsShell(title) {
-  var tabs = [['all','ทั้งหมด'],['customer','ลูกค้า'],['supplier','ซัพพลายเออร์']].map(function(t) {
+  var tabs = [['all','ทั้งหมด'],['customer','ผู้ซื้อ'],['supplier','ผู้ขาย']].map(function(t) {
     return '<button class="chip-btn' + (pageState.contactTab === t[0] ? ' on' : '') + '" type="button" data-tab="' + t[0] + '">' + t[1] + '</button>';
   }).join('');
-  return pageHead(title || 'ศูนย์กลางลูกค้า', 'รายชื่อลูกค้าและซัพพลายเออร์ พร้อมเลขผู้เสียภาษี และยอดค้างชำระ', '<button class="btn btn-primary btn-sm" type="button" data-new="contacts">+ เพิ่มผู้ติดต่อ</button>') +
+  return pageHead(title || 'รายชื่อผู้ซื้อและผู้ขาย', 'รายชื่อคู่ค้า เลือกเป็นผู้ซื้อ ผู้ขาย หรือทั้งสอง พร้อมเลขผู้เสียภาษีและยอดค้างชำระ', '<button class="btn btn-primary btn-sm" type="button" data-new="contacts">+ เพิ่มผู้ติดต่อ</button>') +
     '<div class="toolbar">' + tabs + '<div class="field grow" style="margin-left:auto;max-width:320px"><label for="cq">ค้นหา</label><input id="cq" type="search" data-state="page.contactQ" value="' + esc(pageState.contactQ) + '" placeholder="ชื่อ เลขภาษี หรือเบอร์โทร"></div></div>';
 }
 function contactsData() {
@@ -1266,7 +1266,7 @@ function contactsData() {
     if (tab === 'supplier' && c.kind === 'customer') return false;
     return !q || [c.name, c.taxId, c.phone, c.email].join(' ').toLowerCase().indexOf(q) >= 0;
   });
-  var KIND = { customer:'ลูกค้า', supplier:'ซัพพลายเออร์', both:'ลูกค้า/ซัพพลายเออร์' };
+  var KIND = { customer:'ผู้ซื้อ', supplier:'ผู้ขาย', both:'ผู้ซื้อ / ผู้ขาย' };
   var rows = list.map(function(c) {
     var ar = sumNet(openItems('invoice').filter(function(d) { return d.party === c.name; }));
     var ap = sumNet(openItems('bill').filter(function(d) { return d.party === c.name; }));

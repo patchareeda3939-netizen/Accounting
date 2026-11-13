@@ -22,7 +22,7 @@ function whtCerts() {
   var out = [];
   STORE.documents.forEach(function(d) {
     if (d.group !== 'supplier' || d.voided) return;
-    var rate = Number(d.whtRate) || 0, sub = Number(d.subtotal) || 0;
+    var rate = Number(d.whtRate) || 0, sub = Number(d.whtMode === 'product' ? d.whtBase : d.subtotal) || 0;
     if ((d.type === 'expense' || d.type === 'checkPayment') && Number(d.wht) > 0) out.push({ d: d, idx: -1, date: d.date, base: sub, wht: Number(d.wht), rate: rate });
     (d.payments || []).forEach(function(p, i) {
       if (!(Number(p.wht) > 0)) return;

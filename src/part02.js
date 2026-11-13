@@ -385,12 +385,16 @@ function fieldHTML(f, val, idPrefix) {
     ' value="' + esc(v) + '" placeholder="' + esc(f.placeholder || '') + '"></div>';
 }
 
+function contactRolesHTML(kind) {
+  kind = kind || 'customer';
+  return '<div class="field"><label>บทบาทรายชื่อ *</label><div role="group" aria-label="บทบาทรายชื่อ" style="display:flex;gap:20px;flex-wrap:wrap"><label style="display:flex;align-items:center;gap:6px"><input id="r_role_supplier" type="checkbox" style="width:auto"' + (kind === 'supplier' || kind === 'both' ? ' checked' : '') + '>ผู้ขาย</label><label style="display:flex;align-items:center;gap:6px"><input id="r_role_customer" type="checkbox" style="width:auto"' + (kind === 'customer' || kind === 'both' ? ' checked' : '') + '>ผู้ซื้อ</label></div><span class="small muted">เลือกอย่างน้อยหนึ่งรายการ หรือเลือกทั้งสองเมื่อเป็นทั้งผู้ขายและผู้ซื้อ</span></div>';
+}
 function openRecordForm(coll, rec, defaults) {
   if (coll === 'products' && typeof openProductForm === 'function') return openProductForm(rec, defaults);
   var meta = COLL_META[coll];
   var src = rec || defaults || {};
   if (coll === 'accounts') src = Object.assign({}, src, { accType: accSubtype(src) });
-  var body = meta.fields.map(function(f) { return fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
+  var body = meta.fields.map(function(f) { return coll === 'contacts' && f.key === 'kind' ? contactRolesHTML(src.kind) : fieldHTML(f, src[f.key], 'r_'); }).join('') + '<div class="form-error" id="formError" hidden></div>';
   var buttons = [];
   if (rec) buttons.push(confirmDeleteBtn(function(el) {
     runSave(el, async function() { await delRec(coll, rec._id); showToast('ลบแล้ว'); closeModal(); });
@@ -405,6 +409,12 @@ function saveRecord(btn, coll, rec) {
   var out = {};
   var err = null;
   meta.fields.forEach(function(f) {
+    if (coll === 'contacts' && f.key === 'kind') {
+      var seller = byId('r_role_supplier').checked, buyer = byId('r_role_customer').checked;
+      out.kind = seller && buyer ? 'both' : seller ? 'supplier' : buyer ? 'customer' : '';
+      if (!out.kind && !err) err = 'เลือกผู้ขายหรือผู้ซื้ออย่างน้อยหนึ่งรายการ';
+      return;
+    }
     var el = byId('r_' + f.key);
     var v = el.value.trim();
     if (f.required && !v && !err) err = 'กรุณาระบุ' + f.label;
@@ -487,7 +497,7 @@ function openDocForm(typeKey, doc, prefill) {
         return '<option value="' + o[0] + '"' + ((d.vatMode || 'none') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div>';
     if (def.wht) O += '<div class="field"><label for="f_wht">' + (def.group === 'customer' ? 'ลูกค้าหัก ณ ที่จ่าย' : 'หัก ณ ที่จ่าย') + '</label><select id="f_wht">' +
-        WHT_RATES.map(function(r) { return '<option value="' + r + '"' + (Number(d.whtRate || 0) === r ? ' selected' : '') + '>' + (r ? r + '%' : 'ไม่หัก') + '</option>'; }).join('') + '</select></div>';
+        (def.group === 'supplier' && def.template === 'itemized' ? '<option value="product"' + (d.whtMode === 'product' || (!doc && def.template === 'itemized' && d.whtRate == null && STORE.products.some(function(p) { return productWhtRule(p); })) ? ' selected' : '') + '>อัตโนมัติตามสินค้า/บริการ</option>' : '') + WHT_RATES.map(function(r) { return '<option value="' + r + '"' + (d.whtMode !== 'product' && !(!doc && def.template === 'itemized' && d.whtRate == null && def.group === 'supplier' && STORE.products.some(function(p) { return productWhtRule(p); })) && Number(d.whtRate || 0) === r ? ' selected' : '') + '>' + (r ? r + '%' : 'ไม่หัก') + '</option>'; }).join('') + '</select></div>';
     if (typeKey === 'invoice' || typeKey === 'bill') {
       var tpDef = d.taxPoint || (isServiceAcc(ex.account || '') ? 'payment' : 'invoice');
       O += '<div class="field"><label for="f_taxpoint">จุดความรับผิดภาษี (VAT)</label><select id="f_taxpoint">' +
@@ -600,13 +610,14 @@ function renderItemRows() {
   body.querySelectorAll('select[data-f="name"]').forEach(function(sel) {
     sel.addEventListener('change', function() {
       var i = Number(sel.dataset.idx), r = form.items[i];
-      if (sel.value === '__free') { r._free = true; r.name = ''; renderItemRows(); var t = body.querySelector('[data-idx="' + i + '"][data-f="name"]'); if (t) t.focus(); return; }
-      r.name = sel.value;
+      if (sel.value === '__free') { r._free = true; r.name = ''; delete r.whtRule; renderItemRows(); var t = body.querySelector('[data-idx="' + i + '"][data-f="name"]'); if (t) t.focus(); return; }
+      r.name = sel.value; delete r.whtRule;
       var p = STORE.products.find(function(p) { return p.name === sel.value; });
       if (p) {
         var sup = DOC_TYPES[form.type] && DOC_TYPES[form.type].group === 'supplier';
         var pr = sup ? (p.cost != null && p.cost !== '' ? p.cost : p.price) : p.price;
         if (pr != null && pr !== '') r.price = Number(pr) || 0;
+        r.whtRule = productWhtRule(p);
         if (p.desc) r.desc = p.desc;
       }
       renderItemRows();
@@ -619,6 +630,7 @@ function renderItemRows() {
       if (f === 'date') return;
       if (f === 'desc') { inp.style.height = 'auto'; inp.style.height = inp.scrollHeight + 'px'; return; }
       if (f === 'name') {
+        delete form.items[i].whtRule;
         var p = STORE.products.find(function(p) { return p.name === inp.value; });
         if (p && p.price != null && !form.items[i].price) {
           form.items[i].price = Number(p.price) || 0;
@@ -684,6 +696,25 @@ function renderJournalRows() {
   updateSummary();
 }
 
+function productWhtRule(p) {
+  return p && p.whtEnabled && Number(p.whtRate) > 0 && Number(p.whtRate) <= 100 && Number(p.whtMin) >= 0 ? { productId:p._id || p.name, rate:Number(p.whtRate), min:round2(Number(p.whtMin)) } : null;
+}
+function itemWhtRule(r) {
+  if (Object.prototype.hasOwnProperty.call(r, 'whtRule')) return r.whtRule;
+  return productWhtRule(STORE.products.find(function(p) { return p.name === r.name; }));
+}
+function productWhtTotals(items, vatMode) {
+  var groups = {};
+  (items || []).forEach(function(r) {
+    var rule = itemWhtRule(r); if (!rule) return;
+    var key = rule.productId + ':' + rule.rate + ':' + rule.min;
+    var g = groups[key] || (groups[key] = { name:r.name, rate:rule.rate, min:rule.min, base:0 });
+    g.base += Math.max(0, (Number(r.qty) || 0) * (Number(r.price) || 0) - (Number(r.discount) || 0)) / (vatMode === 'inclusive' ? 1 + VAT_RATE : 1);
+  });
+  var base = 0, amount = 0, applied = [];
+  Object.keys(groups).forEach(function(k) { var g = groups[k]; g.base = round2(g.base); if (g.base >= g.min && g.base > 0) { g.amount = round2(g.base * g.rate / 100); base += g.base; amount += g.amount; applied.push(g); } });
+  return { base:round2(base), amount:round2(amount), rate:base ? amount / base * 100 : 0, groups:applied };
+}
 function computeTotals() {
   var def = DOC_TYPES[form.type];
   var base = 0;
@@ -696,8 +727,10 @@ function computeTotals() {
   else if (mode === 'inclusive') { subtotal = base / (1 + VAT_RATE); vat = base - subtotal; }
   subtotal = round2(subtotal); vat = round2(vat);
   var total = round2(subtotal + vat);
-  var wht = round2(subtotal * whtRate / 100);
-  return { base: round2(base), vatMode: mode, whtRate: whtRate, subtotal: subtotal, vat: vat, total: total, wht: wht, net: round2(total - wht) };
+  var autoWht = def.wht && def.template === 'itemized' && def.group === 'supplier' && byId('f_wht').value === 'product';
+  var ruleTotals = autoWht ? productWhtTotals(form.items, mode) : null;
+  var wht = autoWht ? ruleTotals.amount : round2(subtotal * whtRate / 100);
+  return { whtMode:autoWht ? 'product' : 'manual', whtBase:autoWht ? ruleTotals.base : subtotal, whtGroups:autoWht ? ruleTotals.groups : [], base: round2(base), vatMode: mode, whtRate: autoWht ? ruleTotals.rate : whtRate, subtotal: subtotal, vat: vat, total: total, wht: wht, net: round2(total - wht) };
 }
 
 function updateSummary() {
@@ -721,7 +754,7 @@ function updateSummary() {
   }
   h += '<div class="sum-line big"><span>รวมทั้งสิ้น</span><span>' + fmtMoney(t.total) + '</span></div>';
   if (t.wht) {
-    h += '<div class="sum-line"><span>หัก ณ ที่จ่าย ' + t.whtRate + '% (จากมูลค่าก่อน VAT)</span><span>−' + fmtMoney(t.wht) + '</span></div>';
+    h += '<div class="sum-line"><span>หัก ณ ที่จ่าย ' + (t.whtMode === 'product' ? 'ตามสินค้า/บริการ' : t.whtRate + '%') + ' (จากมูลค่าก่อน VAT)</span><span>−' + fmtMoney(t.wht) + '</span></div>';
     h += '<div class="sum-line big"><span>' + (def.group === 'customer' ? 'ยอดรับสุทธิ' : 'ยอดจ่ายสุทธิ') + '</span><span>' + fmtMoney(t.net) + '</span></div>';
   }
   el.innerHTML = h;
@@ -775,7 +808,7 @@ async function saveDoc(btn) {
   } else {
     var t = computeTotals();
     if (def.template === 'itemized') {
-      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; return o; });
+      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; if (t.whtMode === 'product') o.whtRule = itemWhtRule(r); return o; });
       if (!rec.items.length) return fail('กรุณาเพิ่มอย่างน้อย 1 รายการ');
     } else rec.items = null;
     if (t.base <= 0) return fail('กรุณาระบุจำนวนเงินมากกว่า 0');
@@ -858,7 +891,7 @@ function openDocDetail(id) {
     h += '<div class="sum-block">';
     if (d.vat) h += '<div class="sum-line"><span>มูลค่าก่อนภาษี</span><span>' + fmtMoney(d.subtotal) + '</span></div><div class="sum-line"><span>ภาษีมูลค่าเพิ่ม 7%</span><span>' + fmtMoney(d.vat) + '</span></div>';
     h += '<div class="sum-line big"><span>รวมทั้งสิ้น</span><span>' + fmtMoney(d.total) + '</span></div>';
-    if (d.wht) h += '<div class="sum-line"><span>หัก ณ ที่จ่าย ' + esc(d.whtRate) + '%</span><span>−' + fmtMoney(d.wht) + '</span></div><div class="sum-line big"><span>ยอดสุทธิ</span><span>' + fmtMoney(d.net) + '</span></div>';
+    if (d.wht) h += '<div class="sum-line"><span>หัก ณ ที่จ่าย ' + (d.whtMode === 'product' ? 'ตามสินค้า/บริการ' : esc(d.whtRate) + '%') + '</span><span>−' + fmtMoney(d.wht) + '</span></div><div class="sum-line big"><span>ยอดสุทธิ</span><span>' + fmtMoney(d.net) + '</span></div>';
     h += '</div>';
   }
   if (def.status && def.flow && !d.voided) h += paymentHistoryHTML(d);
@@ -985,7 +1018,7 @@ function openPayment(d) {
     '<div class="field-row"><div class="field"><label for="p_amount">จำนวนเงินที่' + (cust ? 'ได้รับ' : 'จ่าย') + '</label><input id="p_amount" type="number" step="any" value="' + round2(bal - whtDef) + '"></div>' +
     '<div class="field"><label for="p_ref">เลขที่อ้างอิง / เลขที่เช็ค</label><input id="p_ref" placeholder="เลขที่โอน, เลขที่เช็ค"></div></div>' +
     '<div class="field-row" id="p_chq" hidden><div class="field"><label for="p_cbank">ธนาคารของเช็ค</label><input id="p_cbank"></div><div class="field"><label for="p_cdate">เช็คลงวันที่</label><input id="p_cdate" type="date"></div></div>' +
-    '<div class="field-row"><div class="field"><label for="p_wht">' + (cust ? 'ลูกค้าหัก ณ ที่จ่าย' : 'หัก ณ ที่จ่าย') + (whtAlready ? ' (ตามเอกสาร ' + (Number(d.whtRate) || '') + '% = ' + fmtMoney(whtAlready) + ')' : '') + '</label><div class="pay-wht"><input id="p_wht" type="number" step="any" value="' + whtDef + '">' + [1,2,3,5].map(function(r) { return '<button type="button" class="chip-btn" data-whtr="' + r + '">' + r + '%</button>'; }).join('') + '</div></div>' +
+    '<div class="field-row"><div class="field"><label for="p_wht">' + (cust ? 'ลูกค้าหัก ณ ที่จ่าย' : 'หัก ณ ที่จ่าย') + (whtAlready ? ' (ตามเอกสาร ' + (d.whtMode === 'product' ? 'สินค้า/บริการ' : (Number(d.whtRate) || '') + '%') + ' = ' + fmtMoney(whtAlready) + ')' : '') + '</label><div class="pay-wht"><input id="p_wht" type="number" step="any" value="' + whtDef + '">' + [1,2,3,5].map(function(r) { return '<button type="button" class="chip-btn" data-whtr="' + r + '">' + r + '%</button>'; }).join('') + '</div></div>' +
     '<div class="field"><label for="p_fee">ค่าธรรมเนียมธนาคาร</label><input id="p_fee" type="number" step="any" value="0"></div></div>' +
     '<div class="field"><label for="p_note">หมายเหตุ</label><input id="p_note"></div>' +
     (cust ? '<div class="banner info small">ระบบจะออกใบเสร็จรับเงินให้อัตโนมัติเมื่อบันทึก (เลขที่ ' + esc(nextDocNo('receipt', todayStr())) + ')</div>' : '') +
