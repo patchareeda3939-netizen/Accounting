@@ -47,6 +47,16 @@ const assert=require('node:assert/strict');
    await page.locator('[data-ocr="0:advanceId"]').selectOption('av1');
    assert.ok(await page.locator('[data-ocrvendoradd="0"]').isVisible());
    assert.ok(await page.locator('[data-ocracc="0:5360"]').isVisible());
+   await page.locator('[data-ocracc="0:5360"]').click();
+   const itemName=page.locator('[data-ocri="0:0:name"]');
+   assert.equal(await itemName.inputValue(),'DIESEL B7');
+   await itemName.fill('');
+   await itemName.press('Tab');
+   assert.equal(await itemName.inputValue(),'ค่าน้ำมัน');
+   await page.locator('[data-ocr="0:account"]').selectOption('');
+   assert.equal(await itemName.inputValue(),'');
+   await itemName.fill('DIESEL B7');
+   await itemName.press('Tab');
    await page.evaluate(()=>{STORE.accounts=[];refreshPageData();});
    assert.ok((await page.locator('.ocr-form').innerText()).includes('หมวดที่แนะนำ: ค่าน้ำมัน'));
    for (const [type, child] of [['expense', 'expenseTx'], ['bill', 'bill']]) {
