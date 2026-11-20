@@ -271,7 +271,7 @@ function ocrNormalizePostalVendor(j) {
 }
 function ocrDetailName(value) {
   var name = String(value || '').trim();
-  return /^(ค่าใช้จ่ายตามเอกสาร|ค่าใช้จ่าย|ค่าบริการ|อื่น\s*ๆ|other)$/i.test(name) ? '' : name;
+  return /^(ค่าใช้จ่ายตามเอกสาร|ค่าใช้จ่าย)$/.test(name) ? '' : name;
 }
 function ocrExpenseAccount(d) {
   return d.account && STORE.accounts.find(function(a) { return a.code === d.account; });
@@ -484,7 +484,7 @@ var OCR_ACCOUNT_RULES = [
 function ocrAccountSuggestions(cat, vendor, items, rawText) {
   var list = accountsFor('supplier'), found = {};
 
-  var sources = [[cat || '', 100, 'หมวดที่อ่านได้'], [(items || []).map(function(x) { return ocrDetailName(x.name); }).join(' '), 90, 'รายการในเอกสาร'], [rawText || '', 60, 'ข้อความ OCR'], [vendor || '', 40, 'ชื่อผู้ขาย']];
+  var sources = [[cat || '', 100, 'หมวดที่อ่านได้'], [(items || []).map(function(x) { return ocrDetailName(x.name); }).filter(function(name) { return name !== 'ค่าบริการ'; }).join(' '), 90, 'รายการในเอกสาร'], [rawText || '', 60, 'ข้อความ OCR'], [vendor || '', 40, 'ชื่อผู้ขาย']];
   function add(a, score, reason) { if (!found[a.code] || found[a.code].score < score) found[a.code] = { code: a.code, name: a.name, score: score, reason: reason }; }
   sources.forEach(function(src) {
     if (!src[0]) return;

@@ -84,6 +84,7 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   assert.equal(ctx.ocrItemName(fallbackItem, {name:'ค่าน้ำมัน'}), 'ค่าน้ำมัน');
   assert.equal(ctx.ocrItemName(fallbackItem, {name:'ค่าเดินทาง'}), 'ค่าเดินทาง');
   assert.equal(ctx.ocrItemName(fallbackItem), '');
+  assert.equal(ctx.ocrItemName({name:'ค่าบริการ'}, {name:'ค่าเดินทาง'}), 'ค่าบริการ');
   const described = ctx.ocrReceiptItems({total:235}, 'รายละเอียด: ส่งเอกสาร EMS')[0];
   assert.equal(ctx.ocrItemName(described, {name:'ค่าไปรษณีย์'}), 'ส่งเอกสาร EMS');
   ctx.fileToImages = realFileToImages;
