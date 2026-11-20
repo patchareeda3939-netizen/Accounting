@@ -7410,7 +7410,7 @@ function bindOcr() {
   c.querySelectorAll('[data-ocradd]').forEach(function(b) { b.onclick = function() { ocr.items[Number(b.dataset.ocradd)].data.items.push({ name:'', qty:1, price:0 }); refreshPageData(); }; });
   c.querySelectorAll('[data-ocrrm]').forEach(function(b) { b.onclick = function() { ocr.items.splice(Number(b.dataset.ocrrm), 1); refreshPageData(); }; });
   c.querySelectorAll('[data-ocrsave]').forEach(function(b) { b.onclick = function() { ocrCreate(Number(b.dataset.ocrsave), b); }; });
-  c.querySelectorAll('[data-ocropen]').forEach(function(b) { b.onclick = function() { openDocDetail(ocr.items[Number(b.dataset.ocropen)].docId); }; });
+  c.querySelectorAll('[data-ocropen]').forEach(function(b) { b.onclick = function() { ocrGoToDocument(ocr.items[Number(b.dataset.ocropen)].docId); }; });
 }
 // PDF.js emits positioned fragments, not necessarily one item per line.
 function ocrPdfText(items) {
@@ -7730,6 +7730,13 @@ function ocrAccountHint(d, rawText, i) {
 }
 function ocrAccountButtons(accounts, i, reason) {
   return accounts.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(reason || a.reason) + '</div>'; }).join('');
+}
+function ocrGoToDocument(id) {
+  var doc = findDoc(id);
+  if (!doc) return showToast('ไม่พบเอกสาร');
+  var child = doc.type === 'bill' ? 'bill' : 'expenseTx';
+  Object.assign(txSt('billing:' + child), { type: '', period: 'all', status: '', page: 0, q: doc.docNo || '' });
+  go('billing', child);
 }
 async function ocrCreate(i, btn) {
   var it = ocr.items[i], d = it.data; if (!d || it.docId) return;
