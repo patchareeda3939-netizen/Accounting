@@ -13,6 +13,15 @@ const parse = text => ctx.parseReceiptText('ร้านทดสอบ\n' + tex
   assert.equal(parse('SUBTOTAL 1200.00\nGrand Total 1070.00').total, 1070);
   assert.equal(parse('สินค้า 1 1070.00 1070.00\nเงินสด 2000.00\nเงินทอน 930.00').total, 1070);
   assert.equal(parse('เงินสด 2000.00\nเงินทอน 930.00').total, 0);
+  const postalText = 'บริษัทไปรษณีย์ไทย จำกัด\nสาขาที่ 0140\nTAX ID. 0105546095724\nใบรับเงิน\nPOS B02021000203573 RCPT# 22918\nEMS ในประเทศ ฿37.00\nค่าบริการขนส่งเพิ่มเติม ฿3.00\nรวมทั้งสิ้น ฿235.00\nเงินสด ฿240.00\nเงินทอน ฿5.00';
+  const postal = ctx.parseReceiptText(postalText);
+  assert.equal(postal.vendorName, 'บริษัท ไปรษณีย์ไทย จำกัด');
+  assert.equal(postal.vendorTaxId, '0105546095724');
+  assert.equal(postal.docNo, '22918');
+  assert.equal(postal.total, 235);
+  assert.equal(ctx.ocrReceiptItems(postal, postalText)[0].name, 'ค่าไปรษณีย์');
+  assert.equal(ctx.parseReceiptText(postalText.replace('บริษัทไปรษณีย์ไทย จำกัด', 'หัวเอกสารอ่านไม่ชัด')).vendorName, postal.vendorName);
+  assert.equal(ctx.parseReceiptText(postalText.replace('TAX ID. 0105546095724\n', '')).vendorTaxId, postal.vendorTaxId);
   const receipt = parse('สินค้า 1 1.000.00 1.000.00\nSubtotal 1.000.00\nVAT 7% 70.00\nGrand Total 1.070.00\nCash 2000.00');
   assert.equal(receipt.items[0].price, 1000);
   assert.equal(receipt.vatMode, 'exclusive');
