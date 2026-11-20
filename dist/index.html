@@ -7737,6 +7737,7 @@ function ocrGoToDocument(id) {
   var child = doc.type === 'bill' ? 'bill' : 'expenseTx';
   Object.assign(txSt('billing:' + child), { type: '', period: 'all', status: '', page: 0, q: doc.docNo || '' });
   go('billing', child);
+  openDocForm(doc.type, doc);
 }
 async function ocrCreate(i, btn) {
   var it = ocr.items[i], d = it.data; if (!d || it.docId) return;

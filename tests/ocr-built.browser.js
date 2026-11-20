@@ -58,7 +58,10 @@ const assert=require('node:assert/strict');
     await page.getByRole('button',{name:'เปิดเอกสาร',exact:true}).click();
     assert.equal(await page.evaluate(()=>pageId()),'billing:' + child);
     assert.ok(await page.getByRole('cell',{name:'OCR-' + type,exact:true}).isVisible());
-    assert.equal(await page.locator('#overlay').evaluate(e=>e.classList.contains('open')),false);
+    assert.ok(await page.locator('#overlay.open.full').isVisible());
+    assert.equal(await page.locator('#f_docno').inputValue(),'OCR-' + type);
+    await page.locator('#modalFoot').getByRole('button',{name:'ยกเลิก',exact:true}).click();
+    assert.equal(await page.locator('#overlay.open').count(),0);
    }
    assert.deepEqual(errors,[]);await page.close();
   }
