@@ -2082,6 +2082,7 @@ function productWhtRule(p) {
   return p && p.whtEnabled && Number(p.whtRate) > 0 && Number(p.whtRate) <= 100 && Number(p.whtMin) >= 0 ? { productId:p._id || p.name, rate:Number(p.whtRate), min:round2(Number(p.whtMin)) } : null;
 }
 function itemWhtRule(r) {
+  if (r._free) return null;
   if (Object.prototype.hasOwnProperty.call(r, 'whtRule')) return r.whtRule;
   return productWhtRule(STORE.products.find(function(p) { return p.name === r.name; }));
 }
@@ -2190,7 +2191,7 @@ async function saveDoc(btn) {
   } else {
     var t = computeTotals();
     if (def.template === 'itemized') {
-      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; if (t.whtMode === 'product') o.whtRule = itemWhtRule(r); return o; });
+      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; if (r._free) o._free = true; if (t.whtMode === 'product') o.whtRule = itemWhtRule(r); return o; });
       if (!rec.items.length) return fail('กรุณาเพิ่มอย่างน้อย 1 รายการ');
     } else rec.items = null;
     if (t.base <= 0) return fail('กรุณาระบุจำนวนเงินมากกว่า 0');
@@ -7501,7 +7502,8 @@ async function ocrAddFiles(files) {
           var nativeText = text === r.text; text = normThaiOcr(text); it.rawText = text;
           j = parseReceiptText(text); via = nativeText ? 'ข้อความใน PDF' : 'Tesseract';
         }
-        var items = ocrReceiptItems(j, it.rawText || r.text);
+        it.rawText = it.rawText || normThaiOcr(r.text);
+        var items = ocrReceiptItems(j, it.rawText);
         var acc = ocrGuessAccount(j.category, j.vendorName, items, it.rawText);
         it.data = { whtMode:!Number(j.whtRate) && typeof itemWhtRule === 'function' && items.some(function(r) { return itemWhtRule(r); }) ? 'product' : 'manual', vendorEntity:j.vendorEntity === 'person' ? 'person' : 'company', category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
         var knownVendor = ocrVendorMatch(it.data);
@@ -7659,11 +7661,15 @@ var OCR_ACCOUNT_RULES = [
     [/น้ำมัน|ดีเซล|เบนซิน|แก๊สโซฮอล์|diesel|ปตท|\bPTT\b|บางจาก|Shell|Caltex|fuel/i, [/น้ำมัน/, /เดินทาง|พาหนะ/], 'ค่าน้ำมัน'],
     [/ค่าเช่า|rent(?:al)?/i, [/เช่า/], 'ค่าเช่า'],
     [/อาหาร|เครื่องดื่ม|กาแฟ|restaurant|coffee/i, [/อาหาร|เครื่องดื่ม/, /รับรอง/], 'ค่าอาหารและเครื่องดื่ม'],
-    [/เครื่องเขียน|กระดาษ|หมึกพิมพ์|วัสดุสำนักงาน|stationery/i, [/วัสดุสำนักงาน|เครื่องเขียน/, /วัสดุ/], 'วัสดุสำนักงาน'],
+    [/เครื่องเขียน|กระดาษ|หมึกพิมพ์|ตลับหมึก|แฟ้มเอกสาร|วัสดุสำนักงาน|stationery|office supplies/i, [/วัสดุสำนักงาน|เครื่องเขียน/, /วัสดุ/], 'วัสดุสำนักงาน'],
     [/ค่าเดินทาง|แท็กซี่|taxi|ค่าทางด่วน|ค่าที่พัก|โรงแรม/i, [/เดินทาง|พาหนะ/, /ที่พัก/], 'ค่าเดินทาง'],
     [/ซ่อม|บำรุงรักษา|repair|maintenance/i, [/ซ่อม|บำรุง/], 'ค่าซ่อมบำรุง'],
     [/โฆษณา|advertising/i, [/โฆษณา|การตลาด/], 'ค่าโฆษณา'],
-    [/ค่าธรรมเนียม|bank fee/i, [/ธรรมเนียม/], 'ค่าธรรมเนียม']
+    [/ค่าธรรมเนียม|bank fee/i, [/ธรรมเนียม/], 'ค่าธรรมเนียม'],
+    [/ค่าขนส่ง|ค่าจัดส่ง|ค่าไปรษณีย์|ค่าบริการจัดส่ง|\b(?:shipping|delivery fee|postage|courier)\b/i, [/ขนส่ง|จัดส่ง|ไปรษณีย์/], 'ค่าขนส่ง'],
+    [/ค่าซอฟต์แวร์|ค่าโปรแกรม|ค่าลิขสิทธิ์ซอฟต์แวร์|software subscription|software license/i, [/ซอฟต์แวร์|โปรแกรม/, /เทคโนโลยีสารสนเทศ/], 'ค่าซอฟต์แวร์'],
+    [/ค่าทำความสะอาด|cleaning service/i, [/ทำความสะอาด/, /ดูแลอาคาร/], 'ค่าทำความสะอาด'],
+    [/ค่าทำบัญชี|ค่าสอบบัญชี|ค่าบริการบัญชี|accounting fee|audit fee/i, [/ทำบัญชี|สอบบัญชี|บริการบัญชี/, /วิชาชีพ/], 'ค่าบริการบัญชี']
   ];
 // Rank against the company's own expense accounts; descriptions outrank vendors.
 function ocrAccountSuggestions(cat, vendor, items, rawText) {
@@ -7698,10 +7704,20 @@ function ocrAccountHint(d, rawText, i) {
   if (!suggestions.length) {
     var text = [d.category, d.vendorName, rawText].concat((d.items || []).map(function(x) { return x.name; })).join(' ');
     var categories = OCR_ACCOUNT_RULES.filter(function(r) { return r[0].test(text); }).map(function(r) { return r[2]; });
+    var fallback = accountsFor('supplier').filter(function(a) {
+      return /^(?:ค่าใช้จ่าย)?(?:ทั่วไป|เบ็ดเตล็ด|อื่น\s*ๆ|อื่น)$/.test(String(a.name || '').trim());
+    }).slice(0, 3);
+    if (fallback.length) {
+      var label = categories.length ? 'หมวดที่แนะนำ: ' + categories.slice(0, 3).join(' · ') + ' · ไม่มีบัญชีเฉพาะในผังบัญชี' : 'ข้อมูลในเอกสารยังไม่พอระบุหมวด';
+      return '<div class="small muted">' + esc(label) + ' · บัญชีทั่วไปที่เลือกได้</div>' + ocrAccountButtons(fallback, i, 'ตรวจสอบก่อนสร้างเอกสาร');
+    }
     if (categories.length) return '<div class="small muted">หมวดที่แนะนำ: ' + esc(categories.slice(0, 3).join(' · ')) + ' · ยังไม่มีบัญชีที่ตรงกันในผังบัญชี กรุณาเลือกหรือเพิ่มบัญชีค่าใช้จ่าย</div>';
     return '<span class="small muted">ยังไม่มีข้อมูลพอแนะนำบัญชี เลือกบัญชีค่าใช้จ่ายเองได้</span>';
   }
-  return '<div class="small muted">บัญชีที่แนะนำ (เลือกเปลี่ยนได้)</div>' + suggestions.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(a.reason) + '</div>'; }).join('');
+  return '<div class="small muted">บัญชีที่แนะนำ (เลือกเปลี่ยนได้)</div>' + ocrAccountButtons(suggestions, i);
+}
+function ocrAccountButtons(accounts, i, reason) {
+  return accounts.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(reason || a.reason) + '</div>'; }).join('');
 }
 async function ocrCreate(i, btn) {
   var it = ocr.items[i], d = it.data; if (!d || it.docId) return;

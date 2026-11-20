@@ -700,6 +700,7 @@ function productWhtRule(p) {
   return p && p.whtEnabled && Number(p.whtRate) > 0 && Number(p.whtRate) <= 100 && Number(p.whtMin) >= 0 ? { productId:p._id || p.name, rate:Number(p.whtRate), min:round2(Number(p.whtMin)) } : null;
 }
 function itemWhtRule(r) {
+  if (r._free) return null;
   if (Object.prototype.hasOwnProperty.call(r, 'whtRule')) return r.whtRule;
   return productWhtRule(STORE.products.find(function(p) { return p.name === r.name; }));
 }
@@ -808,7 +809,7 @@ async function saveDoc(btn) {
   } else {
     var t = computeTotals();
     if (def.template === 'itemized') {
-      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; if (t.whtMode === 'product') o.whtRule = itemWhtRule(r); return o; });
+      rec.items = form.items.filter(function(r) { return r.name; }).map(function(r) { var o = { name: r.name, qty: Number(r.qty) || 0, price: Number(r.price) || 0 }; if (r.desc) o.desc = r.desc; if (Number(r.discount)) o.discount = Number(r.discount); if (r.date) o.date = r.date; if (r.due) o.due = r.due; if (r.ref) o.ref = r.ref; if (r._free) o._free = true; if (t.whtMode === 'product') o.whtRule = itemWhtRule(r); return o; });
       if (!rec.items.length) return fail('กรุณาเพิ่มอย่างน้อย 1 รายการ');
     } else rec.items = null;
     if (t.base <= 0) return fail('กรุณาระบุจำนวนเงินมากกว่า 0');
