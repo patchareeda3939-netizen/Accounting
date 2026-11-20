@@ -49,6 +49,20 @@ const assert=require('node:assert/strict');
    assert.ok(await page.locator('[data-ocracc="0:5360"]').isVisible());
    await page.evaluate(()=>{STORE.accounts=[];refreshPageData();});
    assert.ok((await page.locator('.ocr-form').innerText()).includes('หมวดที่แนะนำ: ค่าน้ำมัน'));
+   for (const [type, child] of [['expense', 'expenseTx'], ['bill', 'bill']]) {
+    await page.evaluate(type=>{
+     STORE.documents.push({_id:type, type, group:'supplier', date:'2020-01-01', docNo:'OCR-' + type, total:235, items:[]});
+     ocr.items[0].docId=type;
+     go('accounting','receiptCapture');
+    },type);
+    await page.getByRole('button',{name:'เปิดเอกสาร',exact:true}).click();
+    assert.equal(await page.evaluate(()=>pageId()),'billing:' + child);
+    assert.ok(await page.getByRole('cell',{name:'OCR-' + type,exact:true}).isVisible());
+    assert.ok(await page.locator('#overlay.open.full').isVisible());
+    assert.equal(await page.locator('#f_docno').inputValue(),'OCR-' + type);
+    await page.locator('#modalFoot').getByRole('button',{name:'ยกเลิก',exact:true}).click();
+    assert.equal(await page.locator('#overlay.open').count(),0);
+   }
    assert.deepEqual(errors,[]);await page.close();
   }
   console.log('PASS built OCR web page and artifact: visible vendor tools/recommendations, mobile/desktop, advance destination, official VAT URL and missing-account category');

@@ -7409,7 +7409,7 @@ function bindOcr() {
   c.querySelectorAll('[data-ocradd]').forEach(function(b) { b.onclick = function() { ocr.items[Number(b.dataset.ocradd)].data.items.push({ name:'', qty:1, price:0 }); refreshPageData(); }; });
   c.querySelectorAll('[data-ocrrm]').forEach(function(b) { b.onclick = function() { ocr.items.splice(Number(b.dataset.ocrrm), 1); refreshPageData(); }; });
   c.querySelectorAll('[data-ocrsave]').forEach(function(b) { b.onclick = function() { ocrCreate(Number(b.dataset.ocrsave), b); }; });
-  c.querySelectorAll('[data-ocropen]').forEach(function(b) { b.onclick = function() { openDocDetail(ocr.items[Number(b.dataset.ocropen)].docId); }; });
+  c.querySelectorAll('[data-ocropen]').forEach(function(b) { b.onclick = function() { ocrGoToDocument(ocr.items[Number(b.dataset.ocropen)].docId); }; });
 }
 // PDF.js emits positioned fragments, not necessarily one item per line.
 function ocrPdfText(items) {
@@ -7467,6 +7467,14 @@ var OCR_PROMPT = 'คุณคือผู้ช่วยบัญชีไท�
   '{"vendorName":"ชื่อผู้ขาย/ร้าน","vendorEntity":"company|person","vendorTaxId":"เลขผู้เสียภาษี 13 หลักของผู้ขาย (ตัวเลขล้วน) หรือ \\"\\"","vendorAddress":"","vendorBranch":"เช่น สำนักงานใหญ่ หรือ สาขาที่ 00001","docNo":"เลขที่ใบกำกับ/ใบเสร็จ","date":"YYYY-MM-DD (แปลง พ.ศ. เป็น ค.ศ.)","dueDate":"YYYY-MM-DD หรือ \\"\\"",' +
   '"items":[{"name":"ชื่อรายการ","qty":1,"price":0}],"vatMode":"exclusive|inclusive|none","subtotal":0,"vat":0,"total":0,"whtRate":0,"paid":true,"category":"หมวดค่าใช้จ่ายสั้นๆ เช่น ค่าน้ำมัน ค่าอาหาร ค่าเช่า ค่าบริการ วัสดุสำนักงาน"}\n' +
   'กติกา: price เป็นราคาต่อหน่วยตามที่พิมพ์ในเอกสาร; ถ้าราคาในรายการรวม VAT แล้วให้ vatMode="inclusive"; ถ้าแยก VAT 7% ท้ายบิลให้ "exclusive"; ถ้าไม่มี VAT ให้ "none"; ถ้าเป็นใบแจ้งหนี้/บิลที่ยังไม่ชำระให้ paid=false; ตัวเลขเป็น number ไม่มีคอมมา; อ่านไม่ออกให้เว้นว่าง';
+function ocrNormalizePostalVendor(j) {
+  var tax = ocrTaxId(j.vendorTaxId), name = normThaiOcr(j.vendorName).replace(/\s/g, '');
+  if (tax === '0105546095724' || (!tax && /ไปรษณีย์?ไทย|ThailandPost/i.test(name))) {
+    j.vendorName = 'บริษัท ไปรษณีย์ไทย จำกัด';
+    j.vendorTaxId = '0105546095724';
+    j.vendorEntity = 'company';
+  }
+}
 function ocrExpenseItemName(category, text) {
   var cat = String(category || '').trim();
   if (cat && !/^(ค่าใช้จ่ายตามเอกสาร|ค่าใช้จ่าย|ค่าบริการ|อื่น\s*ๆ|other)$/i.test(cat)) return cat;
@@ -7502,8 +7510,9 @@ async function ocrAddFiles(files) {
           var nativeText = text === r.text; text = normThaiOcr(text); it.rawText = text;
           j = parseReceiptText(text); via = nativeText ? 'ข้อความใน PDF' : 'Tesseract';
         }
+        ocrNormalizePostalVendor(j);
         it.rawText = it.rawText || normThaiOcr(r.text);
-        var items = ocrReceiptItems(j, it.rawText);
+        var items = ocrReceiptItems(j, [it.rawText, j.vendorName].join('\n'));
         var acc = ocrGuessAccount(j.category, j.vendorName, items, it.rawText);
         it.data = { whtMode:!Number(j.whtRate) && typeof itemWhtRule === 'function' && items.some(function(r) { return itemWhtRule(r); }) ? 'product' : 'manual', vendorEntity:j.vendorEntity === 'person' ? 'person' : 'company', category: j.category || '', kind: j.paid === false ? 'bill' : 'expense', vendorName: j.vendorName || '', vendorTaxId: String(j.vendorTaxId || '').replace(/\D/g, ''), vendorAddress: j.vendorAddress || '', vendorBranch: j.vendorBranch || '', docNo: j.docNo || '', date: /^\d{4}-\d{2}-\d{2}$/.test(j.date || '') ? j.date : todayStr(), dueDate: j.dueDate || '', items: items, vatMode: ['exclusive','inclusive','none'].indexOf(j.vatMode) >= 0 ? j.vatMode : 'none', total: Number(j.total) || 0, whtRate: Number(j.whtRate) || 0, account: acc };
         var knownVendor = ocrVendorMatch(it.data);
@@ -7558,7 +7567,7 @@ function normThaiOcr(t) {
 // Branch, register, customer and telephone numbers are not invoice identifiers.
 function ocrDocNo(lines) {
   var id = '([A-Z0-9][A-Z0-9\\/.-]{2,})';
-  var labelled = new RegExp('(?:Invoice|Receipt|Doc(?:ument)?)\\s*(?:Number|No\\.?|#)\\s*[:#：]?\\s*' + id + '|(?:เลขที่ใบกำกับ(?:ภาษี)?|เลขที่ใบกํากับ(?:ภาษี)?|เลขใบกำกับ(?:ภาษี)?|เลขที่ใบเสร็จ|เลขที่เอกสาร|เล่มที่/เลขที่)\\s*[:#：]?\\s*' + id, 'i');
+  var labelled = new RegExp('(?:Invoice|Receipt|RCPT|Doc(?:ument)?)\\s*(?:Number|No\\.?|#)\\s*[:#：]?\\s*' + id + '|(?:เลขที่ใบกำกับ(?:ภาษี)?|เลขที่ใบกํากับ(?:ภาษี)?|เลขใบกำกับ(?:ภาษี)?|เลขที่ใบเสร็จ|เลขที่เอกสาร|เล่มที่/เลขที่)\\s*[:#：]?\\s*' + id, 'i');
   for (var i = 0; i < lines.length; i++) {
     var m = lines[i].match(labelled);
     if (m) return m[1] || m[2];
@@ -7602,6 +7611,7 @@ function parseReceiptText(text) {
   var br = sellerText.match(/(สาขา(?:ที่)?\s*[:：]?\s*\d{1,5}|สำนักงานใหญ่)/);
   j.vendorBranch = br ? br[1] : '';
   j.vendorEntity = /^(นาย|นางสาว|นาง|น\.ส\.|Mr\.?\s|Mrs\.?\s|Ms\.?\s)/i.test(j.vendorName) ? 'person' : 'company';
+  ocrNormalizePostalVendor(j);
   // document number
   j.docNo = ocrDocNo(lines);
   // date
@@ -7666,7 +7676,8 @@ var OCR_ACCOUNT_RULES = [
     [/ซ่อม|บำรุงรักษา|repair|maintenance/i, [/ซ่อม|บำรุง/], 'ค่าซ่อมบำรุง'],
     [/โฆษณา|advertising/i, [/โฆษณา|การตลาด/], 'ค่าโฆษณา'],
     [/ค่าธรรมเนียม|bank fee/i, [/ธรรมเนียม/], 'ค่าธรรมเนียม'],
-    [/ค่าขนส่ง|ค่าจัดส่ง|ค่าไปรษณีย์|ค่าบริการจัดส่ง|\b(?:shipping|delivery fee|postage|courier)\b/i, [/ขนส่ง|จัดส่ง|ไปรษณีย์/], 'ค่าขนส่ง'],
+    [/ไปรษณีย์?ไทย|ค่าไปรษณีย์|\b(?:Thailand\s*Post|EMS|postage)\b/i, [/ไปรษณีย์/, /ขนส่ง|จัดส่ง/], 'ค่าไปรษณีย์'],
+    [/ค่าขนส่ง|ค่าจัดส่ง|ค่าบริการจัดส่ง|\b(?:shipping|delivery fee|courier)\b/i, [/ขนส่ง|จัดส่ง|ไปรษณีย์/], 'ค่าขนส่ง'],
     [/ค่าซอฟต์แวร์|ค่าโปรแกรม|ค่าลิขสิทธิ์ซอฟต์แวร์|software subscription|software license/i, [/ซอฟต์แวร์|โปรแกรม/, /เทคโนโลยีสารสนเทศ/], 'ค่าซอฟต์แวร์'],
     [/ค่าทำความสะอาด|cleaning service/i, [/ทำความสะอาด/, /ดูแลอาคาร/], 'ค่าทำความสะอาด'],
     [/ค่าทำบัญชี|ค่าสอบบัญชี|ค่าบริการบัญชี|accounting fee|audit fee/i, [/ทำบัญชี|สอบบัญชี|บริการบัญชี/, /วิชาชีพ/], 'ค่าบริการบัญชี']
@@ -7718,6 +7729,14 @@ function ocrAccountHint(d, rawText, i) {
 }
 function ocrAccountButtons(accounts, i, reason) {
   return accounts.map(function(a) { return '<div class="small"><button type="button" class="linkish" data-ocracc="' + i + ':' + esc(a.code) + '">' + esc(a.code + ' ' + a.name) + '</button> · ' + esc(reason || a.reason) + '</div>'; }).join('');
+}
+function ocrGoToDocument(id) {
+  var doc = findDoc(id);
+  if (!doc) return showToast('ไม่พบเอกสาร');
+  var child = doc.type === 'bill' ? 'bill' : 'expenseTx';
+  Object.assign(txSt('billing:' + child), { type: '', period: 'all', status: '', page: 0, q: doc.docNo || '' });
+  go('billing', child);
+  openDocForm(doc.type, doc);
 }
 async function ocrCreate(i, btn) {
   var it = ocr.items[i], d = it.data; if (!d || it.docId) return;
