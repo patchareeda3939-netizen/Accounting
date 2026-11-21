@@ -59,10 +59,20 @@ const assert=require('node:assert/strict');
     assert.equal(await page.evaluate(()=>pageId()),'billing:' + child);
     assert.ok(await page.getByRole('cell',{name:'OCR-' + type,exact:true}).isVisible());
     assert.ok(await page.locator('#overlay.open.full').isVisible());
+    assert.ok(await page.locator('#overlay.supplier-editor .supplier-summary #sumBlock').isVisible());
+    for (const size of [{width:390,height:844},{width:1534,height:959}]) {
+     await page.setViewportSize(size);
+     const bounds=await page.locator('#overlay .modal').boundingBox();
+     assert.equal(bounds.width,size.width);
+     assert.equal(bounds.height,size.height);
+    }
     assert.equal(await page.locator('#f_docno').inputValue(),'OCR-' + type);
     await page.locator('#modalFoot').getByRole('button',{name:'ยกเลิก',exact:true}).click();
     assert.equal(await page.locator('#overlay.open').count(),0);
    }
+   await page.evaluate(()=>openDocForm('invoice'));
+   assert.ok(await page.locator('#overlay.open.full').isVisible());
+   assert.equal(await page.locator('#overlay.supplier-editor').count(),0);
    assert.deepEqual(errors,[]);await page.close();
   }
   console.log('PASS built OCR web page and artifact: visible vendor tools/recommendations, mobile/desktop, advance destination, official VAT URL and missing-account category');

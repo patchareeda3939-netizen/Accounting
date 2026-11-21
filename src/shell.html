@@ -304,6 +304,31 @@
   .de-bottom-l textarea { width: 100%; }
   .de-bottom-l { display: flex; flex-direction: column; gap: 12px; max-width: 520px; }
   @media (max-width: 760px) { .de-meta, .de-bottom { grid-template-columns: 1fr; } .de-meta-r { grid-template-columns: 1fr; } .overlay.full .modal-body { padding: 14px 16px; } .de-logo { display: none; } }
+  .overlay.full.supplier-editor .modal { width: 100%; height: 100dvh; border: 0; background: var(--bg-page); }
+  .overlay.full.supplier-editor .modal-head { border-top: 4px solid var(--series-exp); }
+  .overlay.full.supplier-editor .modal-head h2 { font-size: 20px; font-weight: 700; }
+  .overlay.full.supplier-editor .modal-body { max-width: 1480px; }
+  .overlay.full.supplier-editor .modal-foot { background: var(--bg-panel); border-top: 1px solid var(--border); }
+  .overlay.full.supplier-editor .modal-foot .btn-outline { color: var(--text-primary); border-color: var(--border-strong); }
+  .supplier-editor .de-head { align-items: center; }
+  .supplier-editor .de-logo { width: 88px; height: 52px; border: 0; }
+  .supplier-editor .de-logo:empty { display: none; }
+  .supplier-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: 18px; align-items: start; }
+  .supplier-card { min-width: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .supplier-card h3 { margin: 0 0 14px; font-size: 16px; }
+  .supplier-editor .de-meta { grid-template-columns: minmax(0, 1fr); background: transparent; padding: 0; gap: 16px; }
+  .supplier-editor .de-meta-l { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .supplier-editor .de-addr { border: 0; min-height: 0; margin: 0; padding: 0; align-self: end; }
+  .supplier-summary { border-top: 3px solid var(--series-exp); }
+  .supplier-summary .sum-block { background: var(--warn-soft); border-radius: 8px; padding: 10px 12px; }
+  .supplier-summary .de-opts { display: grid; gap: 10px; margin-top: 14px; }
+  .supplier-summary .de-opts .field { min-width: 0; }
+  .supplier-notes .de-bottom-l { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 760px) {
+    .supplier-overview, .supplier-editor .de-meta-l, .supplier-notes .de-bottom-l { grid-template-columns: minmax(0, 1fr); }
+    .supplier-card { padding: 14px; }
+    .overlay.full.supplier-editor .modal-foot { padding: 10px 14px; gap: 6px; }
+  }
   .iv-tabs { display: inline-flex; background: var(--bg-soft, #e9edf0); border-radius: 8px; padding: 4px; margin-bottom: 8px; }
   .iv-tab { border: 0; background: transparent; padding: 8px 22px; border-radius: 6px; font: inherit; color: var(--text-muted); cursor: pointer; }
   .iv-tab.on { background: var(--bg-panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
