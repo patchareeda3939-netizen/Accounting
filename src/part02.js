@@ -330,6 +330,7 @@ var modalBody = byId('modalBody'), modalTitle = byId('modalTitle'), modalFoot = 
 function openModal(o) {
   modalTitle.textContent = o.title;
   modalBody.innerHTML = o.body;
+  overlay.classList.toggle('supplier-editor', !!o.supplierEditor);
   overlay.classList.toggle('full', !!o.full); overlay.classList.toggle('pin-modal', !!o.wide);
   modalFoot.innerHTML = '';
   (o.buttons || []).forEach(function(b) {
@@ -475,10 +476,11 @@ function openDocForm(typeKey, doc, prefill) {
   var ex = d.extra || {};
   var pl = partyList(def);
   var co = coInfoFor(d), cs = companySettings(), logoSrc = cs.logo || '';
+  var supplierEditor = def.group === 'supplier';
   var dueIdx = def.extra.findIndex(function(f) { return f.key === 'dueDate'; });
   var H = '';
-  H += '<div class="de-head"><div><div class="de-title">' + esc(def.label) + '</div><div class="de-co"><b>' + esc(co.name) + '</b>' + (co.address ? '<br>' + esc(co.address) : '') + (co.taxId ? '<br>เลขประจำตัวผู้เสียภาษี ' + esc(co.taxId) + (co.branchName ? ' · ' + esc(co.branchName) : '') : '') + (co.phone ? '<br>โทร ' + esc(co.phone) : '') + '</div></div>' +
-    '<div class="de-logo">' + (logoSrc ? '<img src="' + esc(logoSrc) + '" alt="โลโก้">' : '<span>โลโก้</span>') + '</div></div>';
+  H += '<div class="de-head"><div>' + (supplierEditor ? '' : '<div class="de-title">' + esc(def.label) + '</div>') + '<div class="de-co"><b>' + esc(co.name) + '</b>' + (co.address ? '<br>' + esc(co.address) : '') + (co.taxId ? '<br>เลขประจำตัวผู้เสียภาษี ' + esc(co.taxId) + (co.branchName ? ' · ' + esc(co.branchName) : '') : '') + (co.phone ? '<br>โทร ' + esc(co.phone) : '') + '</div></div>' +
+    '<div class="de-logo">' + (logoSrc ? '<img src="' + esc(logoSrc) + '" alt="โลโก้">' : (supplierEditor ? '' : '<span>โลโก้</span>')) + '</div></div>';
   // meta block
   var L = '<div class="field"><label for="f_party">' + esc(def.partyLabel) + ' *</label><input type="text" id="f_party" ' + (pl ? 'list="' + pl + '" ' : '') + 'value="' + esc(d.party || '') + '" placeholder="เลือก' + esc(def.partyLabel) + '" autocomplete="off"></div><div class="de-addr" id="f_partyAddr"></div>';
   var R = '<div class="field"><label for="f_docno">เลขที่' + esc(def.label) + '</label><input type="text" id="f_docno" value="' + esc(d.docNo || (doc ? '' : nextDocNo(typeKey, d.date || todayStr()))) + '" data-auto="' + (doc && d.docNo ? '' : '1') + '"></div>';
@@ -488,6 +490,7 @@ function openDocForm(typeKey, doc, prefill) {
     var fx = Object.assign({}, f, { key: String(i) });
     R += fieldHTML(fx, ex[f.key], 'fx_');
   });
+  if (supplierEditor) H += '<div class="supplier-overview"><section class="supplier-card"><h3>ข้อมูลเอกสาร</h3>';
   H += '<div class="de-meta"><div class="de-meta-l">' + L + '</div><div class="de-meta-r">' + R + '</div></div>';
   // options row
   var O = '';
@@ -505,11 +508,16 @@ function openDocForm(typeKey, doc, prefill) {
     }
   }
   if (def.flow || ['estimate','salesOrder','purchaseOrder'].indexOf(typeKey) >= 0) O = accountFieldHTML(def.group, ex) + O;
-  if (O) H += '<div class="de-opts">' + O + '</div>';
+  var summary = def.template !== 'record' ? '<div class="sum-block" id="sumBlock"></div>' : '';
+  if (supplierEditor) {
+    H += '</section><section class="supplier-card supplier-summary"><h3>สรุปยอดเอกสาร</h3>' + summary;
+    if (O) H += '<div class="de-opts">' + O + '</div>';
+    H += '</section></div>';
+  } else if (O) H += '<div class="de-opts">' + O + '</div>';
   // items
   var I = '';
   if (def.template === 'itemized') {
-    I += '<h3 class="de-h">ผลิตภัณฑ์หรือบริการ</h3><div class="items-wrap"><table class="items-table de-items"><thead><tr><th style="width:30px">#</th><th style="width:130px">วันที่บริการ</th><th>ผลิตภัณฑ์/บริการ</th><th>คำอธิบาย</th><th style="width:80px">ปริมาณ</th><th style="width:110px">อัตรา</th><th style="width:90px">ส่วนลด</th><th style="width:120px;text-align:right">จำนวนเงิน</th><th style="width:30px"></th></tr></thead><tbody id="itemsBody"></tbody></table></div>';
+    I += '<h3 class="de-h">' + (supplierEditor ? 'รายการสินค้าและค่าใช้จ่าย' : 'ผลิตภัณฑ์หรือบริการ') + '</h3><div class="items-wrap"><table class="items-table de-items"><thead><tr><th style="width:30px">#</th><th style="width:130px">วันที่บริการ</th><th>ผลิตภัณฑ์/บริการ</th><th>คำอธิบาย</th><th style="width:80px">ปริมาณ</th><th style="width:110px">อัตรา</th><th style="width:90px">ส่วนลด</th><th style="width:120px;text-align:right">จำนวนเงิน</th><th style="width:30px"></th></tr></thead><tbody id="itemsBody"></tbody></table></div>';
     I += '<div class="de-btns"><button type="button" class="btn btn-outline" id="addRowBtn">เพิ่มผลิตภัณฑ์หรือบริการ</button> <button type="button" class="btn btn-outline" id="clearRowsBtn">ล้างทุกบรรทัด</button>' + (def.billing ? ' <button type="button" class="btn btn-outline" id="pullInv">ดึงใบแจ้งหนี้ค้างชำระของลูกค้า</button>' : '') + '</div>';
   } else if (def.template === 'journal') {
     if (!STORE.accounts.length) I += '<div class="banner info">ยังไม่มีผังบัญชี ไปที่ การบัญชี → ผังบัญชี เพื่อใช้ผังบัญชีมาตรฐาน หรือพิมพ์ชื่อบัญชีเองได้</div>';
@@ -518,7 +526,7 @@ function openDocForm(typeKey, doc, prefill) {
   } else if (def.template === 'simple') {
     I += '<div class="field" style="max-width:320px"><label for="f_amount">จำนวนเงิน (บาท)</label><input type="number" step="any" id="f_amount" value="' + (d.base != null ? esc(d.base) : (d.total ? esc(d.total) : '')) + '" placeholder="0.00"></div>';
   }
-  H += '<div class="form-items">' + I + '</div>';
+  H += '<div class="form-items' + (supplierEditor ? ' supplier-card' : '') + '">' + I + '</div>';
   // bottom
   var B = '';
   if (def.group === 'customer' || def.group === 'supplier') B += '<div class="field"><label for="f_note">' + (def.group === 'customer' ? 'หมายเหตุถึงลูกค้า' : 'หมายเหตุ') + ' (แสดงในแบบฟอร์ม)</label><textarea id="f_note" rows="3" placeholder="ช่องทางชำระเงิน เลขบัญชี หรือข้อความถึง' + esc(def.partyLabel) + '">' + esc(ex.note || '') + '</textarea></div>';
@@ -526,7 +534,9 @@ function openDocForm(typeKey, doc, prefill) {
   if (def.group === 'customer' || def.group === 'supplier' || def.group === 'other') B += dimSelectsHTML(ex);
   if (branchesFor(ex.branch).length && (def.group === 'customer' || def.group === 'supplier')) B += '<div class="field"><label for="f_branch">สาขาที่ออกเอกสาร</label><select id="f_branch">' + [branchOf('')].concat(branchesFor(ex.branch)).map(function(b) { return '<option value="' + esc(b.code) + '"' + ((ex.branch || '00000') === b.code ? ' selected' : '') + '>' + esc(b.code + ' · ' + branchLabel(b)) + '</option>'; }).join('') + '</select></div>';
   B += '<div class="field"><label>ไฟล์แนบ</label><div id="attList" class="att-list"></div>' + (attEnabled() ? '<label class="btn btn-outline att-add">📎 แนบไฟล์<input type="file" id="attInput" multiple hidden accept="image/*,application/pdf,.csv,.txt,.json,.md"></label><div class="small muted" id="attMsg">รูปภาพ PDF หรือไฟล์ข้อความ ไม่เกิน 20 MB ต่อไฟล์</div>' : '<div class="small muted" id="attMsg">ยังไม่ได้เปิดใช้การแนบไฟล์ (ต้องเปิด Firebase Storage)</div>') + '</div>';
-  H += '<div class="de-bottom"><div class="de-bottom-l">' + B + '</div><div class="de-bottom-r">' + (def.template !== 'record' ? '<div class="sum-block" id="sumBlock"></div>' : '') + '</div></div>';
+  H += supplierEditor
+    ? '<section class="supplier-card supplier-notes"><h3>หมายเหตุและไฟล์แนบ</h3><div class="de-bottom-l">' + B + '</div></section>'
+    : '<div class="de-bottom"><div class="de-bottom-l">' + B + '</div><div class="de-bottom-r">' + summary + '</div></div>';
   H += '<div class="form-error" id="formError" hidden></div>';
   var html = H;
 
@@ -535,7 +545,7 @@ function openDocForm(typeKey, doc, prefill) {
   if (RECUR_TYPES.indexOf(typeKey) >= 0) buttons.push({ label:'ทำให้เกิดเป็นประจำ', cls:'btn-outline', onClick: function(el) { form.after = 'recur'; saveDoc(el); } });
   buttons.push({ label: doc ? 'บันทึกการแก้ไข' : 'บันทึก', cls:'btn-outline', onClick: function(el) { form.after = null; saveDoc(el); } });
   buttons.push({ label:'ตรวจสอบและส่ง', cls:'btn-primary', onClick: function(el) { form.after = (def.group === 'customer' || def.group === 'supplier') ? 'print' : 'detail'; saveDoc(el); } });
-  openModal({ full: true, title: (doc ? 'แก้ไข' + def.label + ' ' + (doc.docNo || '') : def.label + ' ใหม่'), body: html, buttons: buttons, onMount: function() { renderAttList();
+  openModal({ full: true, supplierEditor:supplierEditor, title: (doc ? 'แก้ไข' + def.label + ' ' + (doc.docNo || '') : def.label + ' ใหม่'), body: html, buttons: buttons, onMount: function() { renderAttList();
     var pdfTab = byId('dePdfTab'); if (pdfTab) pdfTab.addEventListener('click', function() { if (form.doc && typeof openPrintViewer === 'function') openPrintViewer(form.doc); else showToast('บันทึกเอกสารก่อนเพื่อดูมุมมอง PDF'); });
     var showAddr = function() { var c = STORE.contacts.find(function(x) { return x.name === byId('f_party').value.trim(); }); byId('f_partyAddr').innerHTML = c ? esc(c.address || '') + (c.taxId ? '<br>เลขผู้เสียภาษี ' + esc(c.taxId) : '') + (c.email ? '<br>' + esc(c.email) : '') : '<span class="muted">ที่อยู่สำหรับออกเอกสาร</span>'; };
     byId('f_party').addEventListener('input', showAddr); showAddr();
